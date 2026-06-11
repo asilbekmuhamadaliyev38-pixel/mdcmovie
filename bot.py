@@ -19,7 +19,7 @@ from telegram.ext import (
     filters
 )
 
-TOKEN = "7991649276:AAE7B_JCKkT98o4LjsbIDWY0gWxO-16OC4U"
+TOKEN = os.environ.get("TOKEN") # Tokenni Render tizimidan oladi
 ADMIN_ID = 5837813502
 SOURCE_CHANNEL = "-1003926152488"
 
