@@ -23,7 +23,7 @@ TOKEN = os.environ.get("TOKEN") # Tokenni Render tizimidan oladi
 ADMIN_ID = 5837813502
 SOURCE_CHANNEL = "-1003926152488"
 
-# Render sizga beradigan bepul URL manzil (Masalan: https://kino-bot.onrender.com)
+# Render sizga beradigan bepul URL manzil
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL") 
 PORT = int(os.environ.get("PORT", 8000))
 
@@ -164,29 +164,36 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
-    if not query:
-        return
-
     results = []
-    for movie_code, data in movies.items():
+    
+    # Kinolarni eng oxirgi qo'shilganidan boshlab teskari tartibda saralash
+    sorted_movies = list(movies.items())[::-1]
+
+    for movie_code, data in sorted_movies:
         if isinstance(data, dict):
             name_in_db = data.get("name", f"Kino {movie_code}")
+            desc_in_db = data.get("desc", "Sifatli formatda yuklab olish")
+            poster_url = data.get("poster", None)
         else:
             name_in_db = f"Kino {movie_code}"
+            desc_in_db = "Kino kodi orqali yuklash"
+            poster_url = None
 
-        if query in name_in_db.lower() or query == str(movie_code):
+        # Agar qidiruv bo'sh bo'lsa hamma kinoni chiqaradi, yozilgan bo'lsa mos kelganini filter qiladi
+        if not query or (query in name_in_db.lower() or query == str(movie_code)):
             results.append(
                 InlineQueryResultArticle(
                     id=str(movie_code),
                     title=f"🎬 {name_in_db.upper()}",
-                    description=f"📥 Bosing — kino yuboriladi | Kod: {movie_code}",
+                    description=f"{desc_in_db} | Kod: {movie_code}",
+                    thumbnail_url=poster_url, # Rasmdagidek poster chiqishi uchun
                     input_message_content=InputTextMessageContent(
                         message_text=str(movie_code)
                     )
                 )
             )
 
-    await update.inline_query.answer(results[:15], cache_time=2)
+    await update.inline_query.answer(results[:25], cache_time=2)
 
 async def send_movie_by_code(chat_id, movie_code, bot, context):
     if movie_code in movies:
@@ -254,32 +261,52 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         if state == "add_movie_name":
             context.user_data["new_movie"] = {"name": text}
             context.user_data["admin_state"] = "add_movie_desc"
-            await update.message.reply_text("📝 2-Qadam: Kino ma'lumotlarini kiriting:", reply_markup=get_cancel_keyboard())
+            await update.message.reply_text("📝 2-Qadam: Kino ma'lumotlarini kiriting (sifati, tili...):", reply_markup=get_cancel_keyboard())
             return
+
         elif state == "add_movie_desc":
             context.user_data["new_movie"]["desc"] = text
             context.user_data["admin_state"] = "add_movie_code"
             await update.message.reply_text("🔑 3-Qadam: Kinoga beriladigan kodni kiriting:", reply_markup=get_cancel_keyboard())
             return
+
         elif state == "add_movie_code":
             context.user_data["new_movie"]["code"] = text
-            context.user_data["admin_state"] = "add_movie_vid"
-            await update.message.reply_text("📥 4-Qadam: Kanaldagi Post ID raqamini yuboring:", reply_markup=get_cancel_keyboard())
+            context.user_data["admin_state"] = "add_movie_poster"
+            await update.message.reply_text("🖼️ 4-Qadam: Kino posteri (rasm) havolasini (linkini) yuboring:", reply_markup=get_cancel_keyboard())
             return
+
+        elif state == "add_movie_poster":
+            context.user_data["new_movie"]["poster"] = text
+            context.user_data["admin_state"] = "add_movie_vid"
+            await update.message.reply_text("📥 5-Qadam: Kanaldagi Post ID raqamini yuboring:", reply_markup=get_cancel_keyboard())
+            return
+
         elif state == "add_movie_vid":
             if not text.isdigit():
                 await update.message.reply_text("❌ Post ID faqat raqam bo'ladi. Qaytadan kiriting:", reply_markup=get_cancel_keyboard())
                 return
             movie_data = context.user_data["new_movie"]
             movie_data["video_id"] = text
-            preview = f"🎬 Nomi: {movie_data['name'].upper()}\n📝 Ma'lumot: {movie_data['desc']}\n🔑 Kod: {movie_data['code']}\n📥 Video ID: {movie_data['video_id']}\n\nTasdiqlaysizmi?"
-            confirm_kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Tasdiqlash", callback_data="confirm_save_movie"), InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_to_main")]])
+            preview = (
+                f"🎬 Nomi: {movie_data['name'].upper()}\n"
+                f"📝 Ma'lumot: {movie_data['desc']}\n"
+                f"🔑 Kod: {movie_data['code']}\n"
+                f"🖼️ Poster: {movie_data['poster']}\n"
+                f"📥 Video ID: {movie_data['video_id']}\n\n"
+                f"Tasdiqlaysizmi?"
+            )
+            confirm_kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Tasdiqlash", callback_data="confirm_save_movie"),
+                 InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_to_main")]
+            ])
             await update.message.reply_text(preview, reply_markup=confirm_kb)
             return
+
         elif state == "waiting_channel_add":
             parts = text.split(" ", 1)
             if len(parts) < 2:
-                await update.message.reply_text("❌ Format xato!\n@kanal_username Kanal Nomi", reply_markup=get_cancel_keyboard())
+                await update.message.reply_text("❌ Format xato!\nTo'g'ri format: @kanal_username Kanal Nomi", reply_markup=get_cancel_keyboard())
                 return
             channels[parts[0]] = parts[1]
             save_data()
@@ -288,36 +315,134 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             await go_to_main_panel(update, user_id)
             return
 
+        elif state == "waiting_channel_remove":
+            if text in channels:
+                del channels[text]
+                save_data()
+                context.user_data["admin_state"] = None
+                await update.message.reply_text("✅ Kanal o'chirildi.")
+                await go_to_main_panel(update, user_id)
+            else:
+                await update.message.reply_text("❌ Bunday kanal topilmadi. Qaytadan kiriting:", reply_markup=get_cancel_keyboard())
+            return
+
+        elif state == "waiting_admin_add" and is_main_admin(user_id):
+            if not text.isdigit():
+                await update.message.reply_text("❌ Faqat Telegram ID raqamini kiriting:", reply_markup=get_cancel_keyboard())
+                return
+            new_id = int(text)
+            if new_id == ADMIN_ID:
+                await update.message.reply_text("❌ Bu allaqachon asosiy admin!", reply_markup=get_cancel_keyboard())
+                return
+            admins.add(new_id)
+            save_data()
+            context.user_data["admin_state"] = None
+            await update.message.reply_text(f"✅ Yangi admin qo'shildi!\nID: {new_id}")
+            await go_to_main_panel(update, user_id)
+            return
+
+        elif state == "waiting_admin_remove" and is_main_admin(user_id):
+            if not text.isdigit():
+                await update.message.reply_text("❌ Faqat Telegram ID raqamini kiriting:", reply_markup=get_cancel_keyboard())
+                return
+            remove_id = int(text)
+            if remove_id == ADMIN_ID:
+                await update.message.reply_text("❌ Asosiy adminni o'chirib bo'lmaydi!", reply_markup=get_cancel_keyboard())
+                return
+            if remove_id in admins:
+                admins.remove(remove_id)
+                save_data()
+                context.user_data["admin_state"] = None
+                await update.message.reply_text(f"✅ Admin o'chirildi!\nID: {remove_id}")
+                await go_to_main_panel(update, user_id)
+            else:
+                await update.message.reply_text("❌ Bunday admin topilmadi. Qaytadan kiriting:", reply_markup=get_cancel_keyboard())
+            return
+
+        elif state == "broadcast_wait" and is_main_admin(user_id):
+            context.user_data["broadcast_text"] = text
+            context.user_data["admin_state"] = None
+            confirm_kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Yuborish", callback_data="broadcast_confirm"),
+                 InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_to_main")]
+            ])
+            await update.message.reply_text(
+                f"📣 Xabar ko'rinishi:\n\n{text}\n\n"
+                f"👥 {len(users)} ta foydalanuvchiga yuboriladi.\n"
+                f"Tasdiqlaysizmi?",
+                reply_markup=confirm_kb
+            )
+            return
+
     if is_admin(user_id):
         if text == "➕ Kino qo'shish":
             context.user_data["admin_state"] = "add_movie_name"
             await update.message.reply_text("🎬 1-Qadam: Kino nomini kiriting:", reply_markup=get_cancel_keyboard())
             return
+
         elif text == "🗑️ Kino o'chirish":
             if not movies:
-                await update.message.reply_text("❌ Bazada kino yo'q.")
+                await update.message.reply_text("❌ Bazada hech qanday kino yo'q.")
                 return
             keyboard = []
             for kod, m_data in movies.items():
                 name = m_data.get("name", f"Kino {kod}").upper() if isinstance(m_data, dict) else f"Kino {kod}"
-                keyboard.append([InlineKeyboardButton(f"🎬 {name} ({kod})", callback_data=f"del_movie_{kod}")])
+                keyboard.append([InlineKeyboardButton(f"🎬 {name} (Kod: {kod})", callback_data=f"del_movie_{kod}")])
             keyboard.append([InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_to_main")])
-            await update.message.reply_text("👇 Tanlang:", reply_markup=InlineKeyboardMarkup(keyboard))
+            await update.message.reply_text("👇 O'chirmoqchi bo'lgan kinoni tanlang:", reply_markup=InlineKeyboardMarkup(keyboard))
             return
+
         elif text == "📊 Statistika":
             today_str = datetime.date.today().strftime("%Y-%m-%d")
             today_count = len(daily_users.get(today_str, set()))
-            await update.message.reply_text(f"📊 Statistika:\n\n👥 Jami: {len(users)}\n📅 Bugun: {today_count}\n🎬 Kinolar: {len(movies)}")
+            await update.message.reply_text(
+                f"📊 Statistika:\n\n"
+                f"👥 Jami foydalanuvchi: {len(users)}\n"
+                f"📅 Bugun: {today_count}\n"
+                f"🎬 Kinolar soni: {len(movies)}"
+            )
             return
+
         elif text == "📋 Kodlar ro'yxati":
             if not movies:
                 await update.message.reply_text("Ro'yxat bo'sh.")
                 return
-            text_codes = "📋 Kodlar:\n\n"
+            text_codes = "📋 Kodlar ro'yxati:\n\n"
             for kod, data in movies.items():
                 name = data.get("name", "Nomsiz").upper() if isinstance(data, dict) else "Kino"
                 text_codes += f"🔑 {kod} → {name}\n"
             await update.message.reply_text(text_codes)
+            return
+
+        elif text == "⚙️ Kanallarni boshqarish":
+            text_ch = "📢 Kanal ro'yxati:\n\n"
+            for ch_id, ch_name in channels.items():
+                text_ch += f"🔹 {ch_name} ({ch_id})\n"
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("➕ Kanal qo'shish", callback_data="ask_channel_add"),
+                 InlineKeyboardButton("🗑️ Kanal o'chirish", callback_data="ask_channel_remove")],
+                [InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_to_main")]
+            ])
+            await update.message.reply_text(text_ch, reply_markup=kb)
+            return
+
+        elif text == "📣 Hammaga xabar yuborish" and is_main_admin(user_id):
+            context.user_data["admin_state"] = "broadcast_wait"
+            await update.message.reply_text(
+                f"📣 Barcha foydalanuvchilarga yubormoqchi bo'lgan xabaringizni yozing:\n\n"
+                f"👥 Jami foydalanuvchilar: {len(users)} ta",
+                reply_markup=get_cancel_keyboard()
+            )
+            return
+
+        elif text == "👑 Adminlarni boshqarish" and is_main_admin(user_id):
+            admin_list = "\n".join([f"• {a_id}" for a_id in admins if a_id != ADMIN_ID]) or "Hozircha yo'q"
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("➕ Admin qo'shish", callback_data="ask_admin_add"),
+                 InlineKeyboardButton("➖ Admin o'chirish", callback_data="ask_admin_remove")],
+                [InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_to_main")]
+            ])
+            await update.message.reply_text(f"👑 Adminlar:\n{admin_list}", reply_markup=kb)
             return
 
     if not await is_joined(context.bot, user_id):
@@ -341,18 +466,181 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
         await query.message.delete()
         if is_admin(user_id):
-            await context.bot.send_message(chat_id=query.message.chat_id, text="🏠 Bosh panel", reply_markup=get_admin_keyboard(user_id))
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="🏠 Bosh panel",
+                reply_markup=get_admin_keyboard(user_id)
+            )
         return
 
     if data == "check":
         if await is_joined(context.bot, user_id):
             await query.answer("✅ Tasdiqlandi!")
-            await send_welcome(query)
+            start_kb = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔍 Kinolarni qidirish", switch_inline_query_current_chat="")
+            ]])
+            await query.message.edit_text(
+                "👋 Assalomu alaykum, botimizga xush kelibsiz\n\n"
+                "🎥 Bot orqali siz sevimli filmlar, seriallar va multfilmlarni sifatli formatda ko'rishingiz mumkin\n\n"
+                "🚀 Shunchaki\n"
+                "— Kino yoki serialning kodini yuboring\n"
+                "— Pastdagi qidiruv bo'limidan foydalaning",
+                reply_markup=start_kb
+            )
         else:
             await query.answer("❌ Hali obuna bo'linmagan!", show_alert=True)
         return
 
-# WEBHOOK REJIMIDA ISHGA TUSHIRISH
+    if not is_admin(user_id):
+        return
+
+    if data.startswith("del_movie_"):
+        kod_to_delete = data.split("_")[2]
+        if kod_to_delete in movies:
+            del movies[kod_to_delete]
+            save_data()
+            await query.answer(f"✅ Kod {kod_to_delete} o'chirildi!", show_alert=True)
+            await query.message.delete()
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="✅ Kino o'chirildi!",
+                reply_markup=get_admin_keyboard(user_id)
+            )
+        else:
+            await query.answer("❌ Bu kino allaqachon o'chirilgan", show_alert=True)
+        return
+
+    if data == "confirm_save_movie":
+        movie_data = context.user_data.get("new_movie")
+        if movie_data:
+            movies[movie_data["code"]] = {
+                "name": movie_data["name"],
+                "desc": movie_data["desc"],
+                "poster": movie_data["poster"],
+                "video_id": movie_data["video_id"]
+            }
+            save_data()
+            context.user_data["admin_state"] = None
+            context.user_data.pop("new_movie", None)
+            await query.answer("✅ Saqlandi!")
+            await query.message.delete()
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=f"✅ Kino qo'shildi! Kod: {movie_data['code']}",
+                reply_markup=get_admin_keyboard(user_id)
+            )
+        return
+
+    elif data == "ask_channel_add":
+        context.user_data["admin_state"] = "waiting_channel_add"
+        await query.message.edit_text(
+            "➕ Yangi kanal qo'shish:\n\n"
+            "Format: @kanal_username Kanal Nomi\n"
+            "Misol: @mdcmovie MDC Movie\n\n"
+            "Yoki bekor qilish uchun:",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_to_main")
+            ]])
+        )
+        return
+
+    elif data == "ask_channel_remove":
+        if not channels:
+            await query.answer("❌ O'chiradigan kanal yo'q!", show_alert=True)
+            return
+        kb = []
+        for ch_id, ch_name in channels.items():
+            kb.append([InlineKeyboardButton(f"🗑️ {ch_name} ({ch_id})", callback_data=f"remove_channel_{ch_id}")])
+        kb.append([InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_to_main")])
+        await query.message.edit_text("👇 O'chirmoqchi bo'lgan kanalni tanlang:", reply_markup=InlineKeyboardMarkup(kb))
+        return
+
+    elif data.startswith("remove_channel_"):
+        ch_id_to_remove = data[len("remove_channel_"):]
+        if ch_id_to_remove in channels:
+            ch_name = channels.pop(ch_id_to_remove)
+            save_data()
+            await query.answer(f"✅ {ch_name} o'chirildi!", show_alert=True)
+            await query.message.delete()
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=f"✅ Kanal o'chirildi: {ch_name}",
+                reply_markup=get_admin_keyboard(user_id)
+            )
+        else:
+            await query.answer("❌ Kanal topilmadi!", show_alert=True)
+        return
+
+    elif data == "ask_admin_add" and is_main_admin(user_id):
+        context.user_data["admin_state"] = "waiting_admin_add"
+        await query.message.edit_text(
+            "➕ Yangi admin qo'shish:\n\n"
+            "Foydalanuvchining Telegram ID raqamini yuboring.\n"
+            "(ID bilish uchun @userinfobot ga /start yuboring)\n\n"
+            "Yoki bekor qilish uchun:",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_to_main")
+            ]])
+        )
+        return
+
+    elif data == "ask_admin_remove" and is_main_admin(user_id):
+        other_admins = [a for a in admins if a != ADMIN_ID]
+        if not other_admins:
+            await query.answer("❌ O'chiradigan admin yo'q!", show_alert=True)
+            return
+        kb = []
+        for a_id in other_admins:
+            kb.append([InlineKeyboardButton(f"❌ {a_id}", callback_data=f"remove_admin_{a_id}")])
+        kb.append([InlineKeyboardButton("🔙 Bekor qilish", callback_data="cancel_to_main")])
+        await query.message.edit_text("👇 O'chirmoqchi bo'lgan adminni tanlang:", reply_markup=InlineKeyboardMarkup(kb))
+        return
+
+    elif data == "broadcast_confirm" and is_main_admin(user_id):
+        msg_text = context.user_data.get("broadcast_text", "")
+        if not msg_text:
+            await query.answer("❌ Xabar topilmadi!", show_alert=True)
+            return
+        await query.answer("📣 Yuborilmoqda...")
+        await query.message.delete()
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="⏳ Xabar yuborilmoqda...",
+            reply_markup=get_admin_keyboard(user_id)
+        )
+        success = 0
+        failed = 0
+        for uid in list(users):
+            try:
+                await context.bot.send_message(chat_id=uid, text=msg_text)
+                success += 1
+            except Exception:
+                failed += 1
+        context.user_data.pop("broadcast_text", None)
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=f"✅ Xabar yuborildi!\n\n"
+                 f"📨 Muvaffaqiyatli: {success} ta\n"
+                 f"❌ Yuborilmadi: {failed} ta",
+            reply_markup=get_admin_keyboard(user_id)
+        )
+        return
+
+    elif data.startswith("remove_admin_") and is_main_admin(user_id):
+        remove_id = int(data.split("_")[2])
+        if remove_id in admins and remove_id != ADMIN_ID:
+            admins.remove(remove_id)
+            save_data()
+            await query.answer("✅ Admin o'chirildi!", show_alert=True)
+            await query.message.delete()
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=f"✅ Admin o'chirildi! ID: {remove_id}",
+                reply_markup=get_admin_keyboard(user_id)
+            )
+        return
+
+# BOTNI WEBHOOK REJIMIDA ISHGA TUSHIRISH
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(InlineQueryHandler(inline_query_handler))
@@ -360,7 +648,6 @@ app.add_handler(CallbackQueryHandler(handle_callbacks))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
 
 if RENDER_EXTERNAL_URL:
-    # Render-da webhook orqali doimiy 24/7 ishga tushirish
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
@@ -368,6 +655,5 @@ if RENDER_EXTERNAL_URL:
         webhook_url=f"{RENDER_EXTERNAL_URL}/webhook"
     )
 else:
-    # Agar kompyuterda ishga tushirsangiz oddiy reja
     print("Lokal rejimda ishga tushdi...")
     app.run_polling()
