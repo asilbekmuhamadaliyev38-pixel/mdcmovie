@@ -648,17 +648,14 @@ app.add_handler(CallbackQueryHandler(handle_callbacks))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
 
 if RENDER_EXTERNAL_URL:
-    # Render beradigan portni aniq olamiz (default 10000)
     RENDER_PORT = int(os.environ.get("PORT", 10000))
-    
     print(f"Webhook rejimda ishga tushmoqda. Port: {RENDER_PORT}")
     app.run_webhook(
         listen="0.0.0.0",
         port=RENDER_PORT,
-        url_path="webhook",  # Telegram so'rovlar keladigan yo'lakcha
+        url_path="webhook",
         webhook_url=f"{RENDER_EXTERNAL_URL}/webhook"
     )
 else:
     print("Lokal rejimda (Polling) ishga tushdi...")
-    app.run_polling()mda (Polling) ishga tushdi...")
     app.run_polling()
