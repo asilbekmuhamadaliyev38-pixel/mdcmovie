@@ -651,7 +651,6 @@ if RENDER_EXTERNAL_URL:
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
-        secret_token="BotSecretToken123",
         webhook_url=f"{RENDER_EXTERNAL_URL}/webhook"
     )
 else:
