@@ -647,12 +647,4 @@ app.add_handler(InlineQueryHandler(inline_query_handler))
 app.add_handler(CallbackQueryHandler(handle_callbacks))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
 
-if RENDER_EXTERNAL_URL:
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        webhook_url=f"{RENDER_EXTERNAL_URL}/webhook"
-    )
-else:
-    print("Lokal rejimda ishga tushdi...")
-    app.run_polling()
+app.run_polling()
