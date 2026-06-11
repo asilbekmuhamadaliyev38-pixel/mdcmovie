@@ -640,11 +640,19 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-# BOTNI WEBHOOK REJIMIDA ISHGA TUSHIRISH
+# BOTNI ISHGA TUSHIRISH (RENDER REJIMLARINI TO'G'RI BOG'LASH)
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(InlineQueryHandler(inline_query_handler))
 app.add_handler(CallbackQueryHandler(handle_callbacks))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
 
-app.run_polling()
+if RENDER_EXTERNAL_URL:
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        webhook_url=f"{RENDER_EXTERNAL_URL}/webhook"
+    )
+else:
+    print("Lokal rejimda (Polling) ishga tushdi...")
+    app.run_polling()
