@@ -522,6 +522,14 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
+    # Tasdiqlash kutilmoqda — faqat callback tugmasini bosish kerak
+    elif state == "waiting_confirm_movie":
+        await update.message.reply_text(
+            "⏳ Iltimos, yuqoridagi xabardagi ✅ Tasdiqlash yoki ❌ Bekor qilish tugmasini bosing.",
+            reply_markup=get_cancel_keyboard()
+        )
+        return
+
     # ==================== ASOSIY ADMIN TUGMALARI (state yo'q) ====================
 
     if state is None:
