@@ -35,7 +35,6 @@ channels = {"@mdcmovie": "MDC Movie"}
 users = set()           
 daily_users = {}       
 
-# SERVER O'CHSA HAM ESALAB QOLISH UCHUN YANGI BAZALAR
 admin_states = {}
 new_movies_temp = {}
 
@@ -80,7 +79,6 @@ def load_data():
                 daily_users = {k: set(v) for k, v in data.items()}
             except Exception: daily_users = {}
             
-    # Jarayonlarni yuklash
     if os.path.exists("admin_states.json"):
         with open("admin_states.json", "r", encoding="utf-8") as f:
             try: admin_states = {int(k): v for k, v in json.load(f).items()}
@@ -90,7 +88,8 @@ def load_data():
             try: new_movies_temp = {int(k): v for k, v in json.load(f).items()}
             except Exception: new_movies_temp = {}
 
-def save_data():
+# FAQAT LOGAL SAQLASH (TEZKOR VA ADASHMAYDIGAN)
+def save_data_local():
     with open("movies.json", "w", encoding="utf-8") as f:
         json.dump(movies, f, ensure_ascii=False, indent=4)
     with open("channels.json", "w", encoding="utf-8") as f:
@@ -102,13 +101,13 @@ def save_data():
     with open("daily_users.json", "w", encoding="utf-8") as f:
         data = {k: list(v) for k, v in daily_users.items()}
         json.dump(data, f, ensure_ascii=False, indent=4)
-        
-    # Jarayonlarni saqlash
     with open("admin_states.json", "w", encoding="utf-8") as f:
         json.dump(admin_states, f, ensure_ascii=False, indent=4)
     with open("new_movies_temp.json", "w", encoding="utf-8") as f:
         json.dump(new_movies_temp, f, ensure_ascii=False, indent=4)
 
+# GITHUB'GA FAOQAT OXIRIDA BIR MARTA YUKLASH FUNKSIYASI
+def push_to_github():
     if GITHUB_TOKEN:
         try:
             url = f"https://api.github.com/repos/{REPO_NAME}/contents/movies.json"
@@ -122,7 +121,7 @@ def save_data():
                 content = base64.b64encode(f.read()).decode("utf-8")
                 
             payload = {
-                "message": "Bot: Kinolar bazasi avtomatik yangilandi",
+                "message": "Bot: Kinolar bazasi yakuniy yangilandi",
                 "content": content,
                 "sha": sha,
                 "branch": "main"
@@ -284,7 +283,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["mode"] = "admin"
         admin_states[user_id] = None
         new_movies_temp.pop(user_id, None)
-        save_data()
+        save_data_local()
         role = "Asosiy Admin" if is_main_admin(user_id) else "Yordamchi Admin"
         await update.message.reply_text(f"👑 Salom {role}! Boshqaruv paneli:", reply_markup=get_admin_keyboard(user_id))
         return
@@ -296,7 +295,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await send_welcome(update)
 
-# XOTIRALI DIALOG REJIMI
 async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     track_user(user_id)
@@ -309,7 +307,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         if text == "👤 Foydalanuvchi rejimiga o'tish":
             context.user_data["mode"] = "user"
             admin_states[user_id] = None
-            save_data()
+            save_data_local()
             await update.message.reply_text("🔄 Foydalanuvchi rejimiga o'tdingiz.", reply_markup=get_user_keyboard(user_id))
             await send_welcome(update, user_id)
             return
@@ -318,12 +316,11 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text("🔄 Admin rejimiga qaytdingiz.", reply_markup=get_admin_keyboard(user_id))
             return
 
-    # ----- ADMIN REJIMI LOGIKASI -----
     if is_admin(user_id) and current_mode == "admin":
         if text == "❌ Bekor qilish":
             admin_states[user_id] = None
             new_movies_temp.pop(user_id, None)
-            save_data()
+            save_data_local()
             await go_to_main_panel(update, user_id)
             return
 
@@ -331,7 +328,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             if state == "add_movie_name":
                 new_movies_temp[user_id] = {"name": text}
                 admin_states[user_id] = "add_movie_desc"
-                save_data()
+                save_data_local()
                 await update.message.reply_text("📝 2-Qadam: Kino ma'lumotlarini kiriting (sifati, tili...):", reply_markup=get_cancel_keyboard())
                 return
 
@@ -339,7 +336,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                 if user_id in new_movies_temp:
                     new_movies_temp[user_id]["desc"] = text
                     admin_states[user_id] = "add_movie_code"
-                    save_data()
+                    save_data_local()
                     await update.message.reply_text("🔑 3-Qadam: Kinoga beriladigan kodni kiriting:", reply_markup=get_cancel_keyboard())
                 return
 
@@ -347,7 +344,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                 if user_id in new_movies_temp:
                     new_movies_temp[user_id]["code"] = text
                     admin_states[user_id] = "add_movie_poster"
-                    save_data()
+                    save_data_local()
                     await update.message.reply_text("🖼️ 4-Qadam: Kino posteri (rasm) havolasini (linkini) yuboring:", reply_markup=get_cancel_keyboard())
                 return
 
@@ -355,7 +352,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                 if user_id in new_movies_temp:
                     new_movies_temp[user_id]["poster"] = text
                     admin_states[user_id] = "add_movie_vid"
-                    save_data()
+                    save_data_local()
                     await update.message.reply_text("📥 5-Qadam: Kanaldagi Post ID raqamini yuboring:", reply_markup=get_cancel_keyboard())
                 return
 
@@ -366,7 +363,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                 if user_id in new_movies_temp:
                     movie_data = new_movies_temp[user_id]
                     movie_data["video_id"] = text
-                    save_data()
+                    save_data_local()
                     preview = (
                         f"🎬 Nomi: {movie_data['name'].upper()}\n"
                         f"📝 Ma'lumot: {movie_data['desc']}\n"
@@ -389,7 +386,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                     return
                 channels[parts[0]] = parts[1]
                 admin_states[user_id] = None
-                save_data()
+                save_data_local()
                 await update.message.reply_text(f"✅ Kanal qo'shildi: {parts[1]}")
                 await go_to_main_panel(update, user_id)
                 return
@@ -398,7 +395,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                 if text in channels:
                     del channels[text]
                     admin_states[user_id] = None
-                    save_data()
+                    save_data_local()
                     await update.message.reply_text("✅ Kanal o'chirildi.")
                     await go_to_main_panel(update, user_id)
                 else:
@@ -415,7 +412,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                     return
                 admins.add(new_id)
                 admin_states[user_id] = None
-                save_data()
+                save_data_local()
                 await update.message.reply_text(f"✅ Yangi admin qo'shildi!\nID: {new_id}")
                 await go_to_main_panel(update, user_id)
                 return
@@ -431,7 +428,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                 if remove_id in admins:
                     admins.remove(remove_id)
                     admin_states[user_id] = None
-                    save_data()
+                    save_data_local()
                     await update.message.reply_text(f"✅ Admin o'chirildi!\nID: {remove_id}")
                     await go_to_main_panel(update, user_id)
                 else:
@@ -441,7 +438,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             elif state == "broadcast_wait" and is_main_admin(user_id):
                 context.user_data["broadcast_text"] = text
                 admin_states[user_id] = None
-                save_data()
+                save_data_local()
                 confirm_kb = InlineKeyboardMarkup([
                     [InlineKeyboardButton("✅ Yuborish", callback_data="broadcast_confirm"),
                      InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_to_main")]
@@ -454,10 +451,9 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                 )
                 return
 
-        # Admin Asosiy Menyu Tugmalari
         if text == "➕ Kino qo'shish":
             admin_states[user_id] = "add_movie_name"
-            save_data()
+            save_data_local()
             await update.message.reply_text("🎬 1-Qadam: Kino nomini kiriting:", reply_markup=get_cancel_keyboard())
             return
         elif text == "🗑️ Kino o'chirish":
@@ -504,7 +500,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             return
         elif text == "📣 Hammaga xabar yuborish" and is_main_admin(user_id):
             admin_states[user_id] = "broadcast_wait"
-            save_data()
+            save_data_local()
             await update.message.reply_text(
                 f"📣 Barcha foydalanuvchilarga yubormoqchi bo'lgan xabaringizni yozing:\n\n"
                 f"👥 Jami foydalanuvchilar: {len(users)} ta",
@@ -525,7 +521,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text("⚠️ Siz admin rejimidasiz! Kinoni kod orqali qidirish uchun avval pastdagi '👤 Foydalanuvchi rejimiga o'tish' tugmasini bosing.")
         return
 
-    # ----- FOYDALANUVCHI REJIMI LOGIKASI -----
     if not await is_joined(context.bot, user_id):
         reply_markup = await get_subscription_keyboard(context.bot)
         await update.message.reply_text("❗ Avval kanallarga obuna bo'ling!", reply_markup=reply_markup)
@@ -544,7 +539,7 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "cancel_to_main":
         admin_states[user_id] = None
         new_movies_temp.pop(user_id, None)
-        save_data()
+        save_data_local()
         await query.answer()
         await query.message.delete()
         if is_admin(user_id):
@@ -581,7 +576,8 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kod_to_delete = data.split("_")[2]
         if kod_to_delete in movies:
             del movies[kod_to_delete]
-            save_data()
+            save_data_local()
+            push_to_github() # O'chirilganda ham oxirida sinxronlash
             await query.answer(f"✅ Kod {kod_to_delete} o'chirildi!", show_alert=True)
             await query.message.delete()
             await context.bot.send_message(
@@ -593,6 +589,7 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ Bu kino allaqachon o'chirilgan", show_alert=True)
         return
 
+    # ENG ASOSIY JOYI: TASDIQLANGANDAGINA GITHUB'GA PUSH BO'LADI
     if data == "confirm_save_movie":
         movie_data = new_movies_temp.get(user_id)
         if movie_data:
@@ -604,8 +601,11 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
             admin_states[user_id] = None
             new_movies_temp.pop(user_id, None)
-            save_data()
-            await query.answer("✅ Saqlandi!")
+            
+            save_data_local()  # Mahalliy bazaga yozish
+            push_to_github()   # Endi bir marta GitHub'ga uzatish (Xavfsiz va qotishlarsiz)
+            
+            await query.answer("✅ Muvaffaqiyatli saqlandi!")
             await query.message.delete()
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
@@ -616,7 +616,7 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "ask_channel_add":
         admin_states[user_id] = "waiting_channel_add"
-        save_data()
+        save_data_local()
         await query.message.edit_text(
             "➕ Yangi kanal qo'shish:\n\n"
             "Format: @kanal_username Kanal Nomi\n"
@@ -643,7 +643,7 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ch_id_to_remove = data[len("remove_channel_"):]
         if ch_id_to_remove in channels:
             ch_name = channels.pop(ch_id_to_remove)
-            save_data()
+            save_data_local()
             await query.answer(f"✅ {ch_name} o'chirildi!", show_alert=True)
             await query.message.delete()
             await context.bot.send_message(
@@ -657,7 +657,7 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "ask_admin_add" and is_main_admin(user_id):
         admin_states[user_id] = "waiting_admin_add"
-        save_data()
+        save_data_local()
         await query.message.edit_text(
             "➕ Yangi admin qo'shish:\n\n"
             "Foydalanuvchining Telegram ID raqamini yuboring.\n"
@@ -715,7 +715,7 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         remove_id = int(data.split("_")[2])
         if remove_id in admins and remove_id != ADMIN_ID:
             admins.remove(remove_id)
-            save_data()
+            save_data_local()
             await query.answer("✅ Admin o'chirildi!", show_alert=True)
             await query.message.delete()
             await context.bot.send_message(
