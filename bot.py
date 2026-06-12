@@ -164,7 +164,6 @@ def get_admin_keyboard(user_id):
         ], resize_keyboard=True)
 
 def get_user_keyboard(user_id):
-    # Agar admin bo'lsa, unga pastda admin paneliga qaytish tugmasini ham qo'shib qo'yamiz
     if is_admin(user_id):
         return ReplyKeyboardMarkup([["👑 Admin rejimiga o'tish"]], resize_keyboard=True)
     return None
@@ -189,7 +188,6 @@ async def send_welcome(update, user_id=None):
         "— Kino yoki serialning kodini yuboring\n"
         "— Pastdagi qidiruv bo'limidan foydalaning"
     )
-    # Agar bu odam admin bo'lsa va foydalanuvchi rejimida bo'lsa, unga maxsus pastki tugmani chiqaramiz
     reply_m = get_user_keyboard(user_id) if user_id else None
     await update.message.reply_text(welcome_text, reply_markup=start_kb)
     if reply_m:
@@ -274,7 +272,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     if is_admin(user_id):
-        # Default holatda adminni ADMIN rejimida boshlaymiz
         context.user_data["mode"] = "admin"
         context.user_data["admin_state"] = None
         context.user_data.pop("new_movie", None)
@@ -289,16 +286,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await send_welcome(update)
 
+# MANA SHU FUNKSIYA TO'LIQ TUZATILDI
 async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     track_user(user_id)
     text = update.message.text.strip()
     
-    # Rejimni aniqlaymiz: default admin rejim bo'ladi
     current_mode = context.user_data.get("mode", "admin" if is_admin(user_id) else "user")
     state = context.user_data.get("admin_state")
 
-    # Rejimlararo o'tish tugmalari (Adminlar uchun)
     if is_admin(user_id):
         if text == "👤 Foydalanuvchi rejimiga o'tish":
             context.user_data["mode"] = "user"
@@ -313,14 +309,13 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # ----- ADMIN REJIMI LOGIKASI -----
     if is_admin(user_id) and current_mode == "admin":
-        # 1. Agar bekor qilish bosilsa
         if text == "❌ Bekor qilish":
             context.user_data["admin_state"] = None
             context.user_data.pop("new_movie", None)
             await go_to_main_panel(update, user_id)
             return
 
-        # 2. Bosqichma-bosqich jarayonlar (State bo'lsa)
+        # Bosqichma-bosqich jarayonlar (State faol bo'lsa)
         if state:
             if state == "add_movie_name":
                 context.user_data["new_movie"] = {"name": text}
@@ -438,7 +433,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                 )
                 return
 
-        # 3. Admin Asosiy Menyu Tugmalari
+        # Admin Asosiy Menyu Tugmalari
         if text == "➕ Kino qo'shish":
             context.user_data["admin_state"] = "add_movie_name"
             await update.message.reply_text("🎬 1-Qadam: Kino nomini kiriting:", reply_markup=get_cancel_keyboard())
@@ -503,11 +498,12 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text(f"👑 Adminlar:\n{admin_list}", reply_markup=kb)
             return
         
-        # Agarda admin rejimida biron tugmaga tushmaydigan tasodifiy matn yozilsa:
-        await update.message.reply_text("⚠️ Siz admin rejimidasiz! Kinoni kod orqali qidirish uchun avval pastdagi '👤 Foydalanuvchi rejimiga o'tish' tugmasini bosing.")
+        # Tugmalardan tashqari mutlaqo begona xabar yozilgandagina ogohlantirish beradi:
+        if not state:
+            await update.message.reply_text("⚠️ Siz admin rejimidasiz! Kinoni kod orqali qidirish uchun avval pastdagi '👤 Foydalanuvchi rejimiga o'tish' tugmasini bosing.")
         return
 
-    # ----- FOYDALANUVCHI REJIMI LOGIKASI (Barcha foydalanuvchilar va 'user' rejimdagi adminlar uchun) -----
+    # ----- FOYDALANUVCHI REJIMI LOGIKASI -----
     if not await is_joined(context.bot, user_id):
         reply_markup = await get_subscription_keyboard(context.bot)
         await update.message.reply_text("❗ Avval kanallarga obuna bo'ling!", reply_markup=reply_markup)
@@ -516,7 +512,6 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     if await send_movie_by_code(update.effective_chat.id, text, context.bot, context):
         return
     else:
-        # Agarda admin foydalanuvchi rejimida noto'g'ri kod kiritsa yoki boshqa gap yozsa tugmalari o'chib ketmaydi
         await update.message.reply_text("❌ Bunday kodli kino topilmadi.")
 
 async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -530,7 +525,7 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
         await query.message.delete()
         if is_admin(user_id):
-            context.user_data["mode"] = "admin" # Panelga qaytganda admin rejimiga o'tkazamiz
+            context.user_data["mode"] = "admin"
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
                 text="🏠 Admin bosh paneli",
