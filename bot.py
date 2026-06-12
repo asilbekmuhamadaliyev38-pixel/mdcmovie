@@ -353,78 +353,59 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     # ==================== STATE'LI JARAYONLAR ====================
-    # Kino qo'shish bosqichlari
+    # Kino qo'shish — BITTA XABARDA (restart muammosini hal qiladi)
 
-    if state == "add_movie_name":
-        new_movies_temp[user_id] = {"name": text}
-        admin_states[user_id] = "add_movie_desc"
-        save_data_local()
-        await update.message.reply_text(
-            "📝 2-Qadam: Kino ma'lumotlarini kiriting (sifati, tili...):",
-            reply_markup=get_cancel_keyboard()
-        )
-        return
-
-    elif state == "add_movie_desc":
-        if user_id in new_movies_temp:
-            new_movies_temp[user_id]["desc"] = text
-            admin_states[user_id] = "add_movie_code"
-            save_data_local()
+    if state == "add_movie_data":
+        lines = [l.strip() for l in text.strip().split("\n") if l.strip()]
+        if len(lines) < 5:
             await update.message.reply_text(
-                "🔑 3-Qadam: Kinoga beriladigan kodni kiriting:",
-                reply_markup=get_cancel_keyboard()
-            )
-        return
-
-    elif state == "add_movie_code":
-        if user_id in new_movies_temp:
-            new_movies_temp[user_id]["code"] = text
-            admin_states[user_id] = "add_movie_poster"
-            save_data_local()
-            await update.message.reply_text(
-                "🖼️ 4-Qadam: Kino posteri (rasm) havolasini (linkini) yuboring:",
-                reply_markup=get_cancel_keyboard()
-            )
-        return
-
-    elif state == "add_movie_poster":
-        if user_id in new_movies_temp:
-            new_movies_temp[user_id]["poster"] = text
-            admin_states[user_id] = "add_movie_vid"
-            save_data_local()
-            await update.message.reply_text(
-                "📥 5-Qadam: Kanaldagi Post ID raqamini yuboring:",
-                reply_markup=get_cancel_keyboard()
-            )
-        return
-
-    elif state == "add_movie_vid":
-        if not text.isdigit():
-            await update.message.reply_text(
-                "❌ Post ID faqat raqam bo'ladi. Qaytadan kiriting:",
+                "❌ Kamida 5 qator bo'lishi kerak!\n\n"
+                "Format (har biri yangi qatorda):\n"
+                "Kino nomi\n"
+                "Ma'lumot (sifat, til...)\n"
+                "kod\n"
+                "https://poster-link.jpg\n"
+                "PostID (raqam)\n\n"
+                "Qaytadan yuboring:",
                 reply_markup=get_cancel_keyboard()
             )
             return
-        if user_id in new_movies_temp:
-            movie_data = new_movies_temp[user_id]
-            movie_data["video_id"] = text
-            save_data_local()
-            preview = (
-                f"🎬 Nomi: {movie_data['name'].upper()}\n"
-                f"📝 Ma'lumot: {movie_data['desc']}\n"
-                f"🔑 Kod: {movie_data['code']}\n"
-                f"🖼️ Poster: {movie_data['poster']}\n"
-                f"📥 Video ID: {movie_data['video_id']}\n\n"
-                f"Tasdiqlaysizmi?"
+
+        name = lines[0]
+        desc = lines[1]
+        code = lines[2]
+        poster = lines[3]
+        video_id = lines[4]
+
+        if not video_id.isdigit():
+            await update.message.reply_text(
+                "❌ 5-qator (Post ID) faqat raqam bo'lishi kerak!\n\nQaytadan yuboring:",
+                reply_markup=get_cancel_keyboard()
             )
-            confirm_kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Tasdiqlash", callback_data="confirm_save_movie"),
-                 InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_to_main")]
-            ])
-            # State'ni tozalaymiz — endi callback kutiladi
-            admin_states[user_id] = "waiting_confirm_movie"
-            save_data_local()
-            await update.message.reply_text(preview, reply_markup=confirm_kb)
+            return
+
+        preview = (
+            f"🎬 Nomi: {name.upper()}\n"
+            f"📝 Ma'lumot: {desc}\n"
+            f"🔑 Kod: {code}\n"
+            f"🖼️ Poster: {poster}\n"
+            f"📥 Video ID: {video_id}\n\n"
+            f"Tasdiqlaysizmi?"
+        )
+        new_movies_temp[user_id] = {
+            "name": name,
+            "desc": desc,
+            "code": code,
+            "poster": poster,
+            "video_id": video_id
+        }
+        admin_states[user_id] = "waiting_confirm_movie"
+        save_data_local()
+        confirm_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Tasdiqlash", callback_data="confirm_save_movie"),
+             InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_to_main")]
+        ])
+        await update.message.reply_text(preview, reply_markup=confirm_kb)
         return
 
     # Kanal boshqaruvi
@@ -534,10 +515,21 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if state is None:
         if text == "➕ Kino qo'shish":
-            admin_states[user_id] = "add_movie_name"
+            admin_states[user_id] = "add_movie_data"
             save_data_local()
             await update.message.reply_text(
-                "🎬 1-Qadam: Kino nomini kiriting:",
+                "🎬 Kino ma'lumotlarini BITTA xabarda yuboring (har biri yangi qatorda):\n\n"
+                "1️⃣ Kino nomi\n"
+                "2️⃣ Ma'lumot (sifat, til...)\n"
+                "3️⃣ Kod\n"
+                "4️⃣ Poster link\n"
+                "5️⃣ Post ID (raqam)\n\n"
+                "Misol:\n"
+                "Avengers\n"
+                "4K | O'zbek tilida\n"
+                "avengers\n"
+                "https://example.com/poster.jpg\n"
+                "12345",
                 reply_markup=get_cancel_keyboard()
             )
             return
