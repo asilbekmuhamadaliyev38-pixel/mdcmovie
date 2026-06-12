@@ -289,12 +289,14 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
     text = update.message.text.strip()
     state = context.user_data.get("admin_state")
 
+    # 1. Agar admin bekor qilishni bossa
     if is_admin(user_id) and text == "❌ Bekor qilish":
         context.user_data["admin_state"] = None
         context.user_data.pop("new_movie", None)
         await go_to_main_panel(update, user_id)
         return
 
+    # 2. Agar admin biror bir bosqichda (state) ma'lumot kiritayotgan bo'lsa
     if is_admin(user_id) and state:
         if state == "add_movie_name":
             context.user_data["new_movie"] = {"name": text}
@@ -412,6 +414,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             )
             return
 
+    # 3. Admin asosiy menyu tugmalarini bossa
     if is_admin(user_id):
         if text == "➕ Kino qo'shish":
             context.user_data["admin_state"] = "add_movie_name"
@@ -483,6 +486,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text(f"👑 Adminlar:\n{admin_list}", reply_markup=kb)
             return
 
+    # 4. Oddiy foydalanuvchilar va kinoni kod orqali qidirish tizimi
     if not await is_joined(context.bot, user_id):
         reply_markup = await get_subscription_keyboard(context.bot)
         await update.message.reply_text("❗ Avval kanallarga obuna bo'ling!", reply_markup=reply_markup)
@@ -678,8 +682,8 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-# BOTNI ISHGA TUSHIRISH (RENDER REJIMLARINI TO'G'RI BOG'LASH)
-load_data() # Fayllarni yuklash funksiyasini ishga tushiramiz
+# BOTNI ISHGA TUSHIRISH
+load_data() 
 
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
