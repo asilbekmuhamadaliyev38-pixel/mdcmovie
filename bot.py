@@ -1,4 +1,6 @@
 import os
+import base64
+import requests
 import json
 import datetime
 from telegram import (
@@ -25,36 +27,67 @@ SOURCE_CHANNEL = "-1003926152488"
 
 # Render sizga beradigan bepul URL manzil
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL") 
-PORT = int(os.environ.get("PORT", 8000))
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+REPO_NAME = "asilbekmuhamadaliyev38-pixel/mdcmovie"
 
 admins = {ADMIN_ID}
 movies = {}      
 channels = {"@mdcmovie": "MDC Movie"}  
-users = set()          
+users = set()           
 daily_users = {}       
+
+def is_main_admin(user_id):
+    return user_id == ADMIN_ID
+
+def is_admin(user_id):
+    return user_id in admins
+
+def track_user(user_id):
+    global users, daily_users
+    users.add(user_id)
+    today_str = datetime.date.today().strftime("%Y-%m-%d")
+    if today_str not in daily_users:
+        daily_users[today_str] = set()
+    daily_users[today_str].add(user_id)
 
 def load_data():
     global movies, channels, admins, users, daily_users
     if os.path.exists("movies.json"):
         with open("movies.json", "r", encoding="utf-8") as f:
-            movies = json.load(f)
+            try:
+                movies = json.load(f)
+            except Exception:
+                movies = {}
     if os.path.exists("channels.json"):
         with open("channels.json", "r", encoding="utf-8") as f:
-            channels = json.load(f)
+            try:
+                channels = json.load(f)
+            except Exception:
+                channels = {"@mdcmovie": "MDC Movie"}
     if os.path.exists("admins.json"):
         with open("admins.json", "r", encoding="utf-8") as f:
-            admins = set(json.load(f))
+            try:
+                admins = set(json.load(f))
+            except Exception:
+                admins = {ADMIN_ID}
     else:
         admins = {ADMIN_ID}
     if os.path.exists("users.json"):
         with open("users.json", "r", encoding="utf-8") as f:
-            users = set(json.load(f))
+            try:
+                users = set(json.load(f))
+            except Exception:
+                users = set()
     if os.path.exists("daily_users.json"):
         with open("daily_users.json", "r", encoding="utf-8") as f:
-            data = json.load(f)
-            daily_users = {k: set(v) for k, v in data.items()}
+            try:
+                data = json.load(f)
+                daily_users = {k: set(v) for k, v in data.items()}
+            except Exception:
+                daily_users = {}
 
 def save_data():
+    # 1. Avval lokal serverning o'ziga saqlaymiz
     with open("movies.json", "w", encoding="utf-8") as f:
         json.dump(movies, f, ensure_ascii=False, indent=4)
     with open("channels.json", "w", encoding="utf-8") as f:
@@ -67,27 +100,35 @@ def save_data():
         data = {k: list(v) for k, v in daily_users.items()}
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-load_data()
-
-def is_admin(user_id):
-    return user_id in admins
-
-def is_main_admin(user_id):
-    return user_id == ADMIN_ID
-
-def track_user(user_id):
-    changed = False
-    if user_id not in users:
-        users.add(user_id)
-        changed = True
-    today = datetime.date.today().strftime("%Y-%m-%d")
-    if today not in daily_users:
-        daily_users[today] = set()
-    if user_id not in daily_users[today]:
-        daily_users[today].add(user_id)
-        changed = True
-    if changed:
-        save_data()
+    # 2. Agar Render'da GITHUB_TOKEN kiritilgan bo'lsa, movies.json ni GitHub'ga ham yuklaymiz
+    if GITHUB_TOKEN:
+        try:
+            url = f"https://api.github.com/repos/{REPO_NAME}/contents/movies.json"
+            headers = {
+                "Authorization": f"token {GITHUB_TOKEN}",
+                "Accept": "application/vnd.github.v3+json"
+            }
+            
+            # GitHub'dagi eski faylning SHA kalitini aniqlab olamiz
+            res = requests.get(url, headers=headers).json()
+            sha = res.get("sha")
+            
+            # Yangi movies.json faylini o'qiymiz va base64 formatga o'giramiz
+            with open("movies.json", "rb") as f:
+                content = base64.b64encode(f.read()).decode("utf-8")
+                
+            payload = {
+                "message": "Bot: Kinolar bazasi avtomatik yangilandi",
+                "content": content,
+                "sha": sha,
+                "branch": "main"
+            }
+            
+            # GitHub'ga yuklash (Push)
+            requests.put(url, headers=headers, json=payload)
+            print("Kino muvaffaqiyatli GitHub'ga yuklandi!")
+        except Exception as e:
+            print(f"GitHub'ga yuklashda xatolik: {e}")
 
 async def is_joined(bot, user_id):
     if not channels:
@@ -165,8 +206,6 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     results = []
-    
-    # Kinolarni eng oxirgi qo'shilganidan boshlab teskari tartibda saralash
     sorted_movies = list(movies.items())[::-1]
 
     for movie_code, data in sorted_movies:
@@ -179,14 +218,13 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             desc_in_db = "Kino kodi orqali yuklash"
             poster_url = None
 
-        # Agar qidiruv bo'sh bo'lsa hamma kinoni chiqaradi, yozilgan bo'lsa mos kelganini filter qiladi
         if not query or (query in name_in_db.lower() or query == str(movie_code)):
             results.append(
                 InlineQueryResultArticle(
                     id=str(movie_code),
                     title=f"🎬 {name_in_db.upper()}",
                     description=f"{desc_in_db} | Kod: {movie_code}",
-                    thumbnail_url=poster_url, # Rasmdagidek poster chiqishi uchun
+                    thumbnail_url=poster_url,
                     input_message_content=InputTextMessageContent(
                         message_text=str(movie_code)
                     )
@@ -622,7 +660,7 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=f"✅ Xabar yuborildi!\n\n"
                  f"📨 Muvaffaqiyatli: {success} ta\n"
                  f"❌ Yuborilmadi: {failed} ta",
-            reply_markup=get_admin_keyboard(user_id)
+             reply_markup=get_admin_keyboard(user_id)
         )
         return
 
@@ -641,6 +679,8 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 # BOTNI ISHGA TUSHIRISH (RENDER REJIMLARINI TO'G'RI BOG'LASH)
+load_data() # Fayllarni yuklash funksiyasini ishga tushiramiz
+
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(InlineQueryHandler(inline_query_handler))
