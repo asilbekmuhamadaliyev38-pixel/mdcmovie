@@ -100,5 +100,11 @@
         "desc": "uzmovi",
         "poster": "https://uae.voxcinemas.com/images/Backrooms_3331e42690.png?w=1920&q=85&fm=webp",
         "video_id": "23"
+    },
+    "17": {
+        "name": "Michael",
+        "desc": "2026 | 720p",
+        "poster": "https://ktla.com/wp-content/uploads/sites/4/2026/04/Michael-movie-poster.png",
+        "video_id": "24"
     }
 }
