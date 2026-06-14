@@ -106,11 +106,5 @@
         "desc": "2026 | 720p",
         "poster": "https://ktla.com/wp-content/uploads/sites/4/2026/04/Michael-movie-poster.png",
         "video_id": "24"
-    },
-    "18": {
-        "name": "Test kino bot",
-        "desc": "1080p | uzb",
-        "poster": "AgACAgIAAxkBAAIfaGouAjq-OaIfIbGrqonikAwwjTb4AALCI2sbh9dxSRKvG_1SQBmpAQADAgADeQADPAQ",
-        "video_id": "25"
     }
 }
