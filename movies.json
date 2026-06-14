@@ -172,5 +172,11 @@
         "desc": "1080p uzb",
         "poster": "https://i.ibb.co/TqWQzyMv/photo.jpg",
         "video_id": "48"
+    },
+    "29": {
+        "name": "Interstellar (2014)",
+        "desc": "Video: 1080p | Blu-Ray | IMAX",
+        "poster": "https://i.ibb.co/p6NSB5D1/photo.jpg",
+        "video_id": "49"
     }
 }
