@@ -160,5 +160,11 @@
         "desc": "Video: 720p | BDRip | IMAX",
         "poster": "https://i.ibb.co/spZ0XvBV/photo.jpg",
         "video_id": "46"
+    },
+    "27": {
+        "name": "Dalil     Tenet (2020)",
+        "desc": "Video: 1080p | BRRip | IMAX",
+        "poster": "https://i.ibb.co/vCBqb34P/photo.jpg",
+        "video_id": "47"
     }
 }
