@@ -154,5 +154,11 @@
         "desc": "Video: 1080p | Blu-Ray",
         "poster": "https://i.ibb.co/jZ3Q1t8C/photo.jpg",
         "video_id": "45"
+    },
+    "26": {
+        "name": "Oppengeymer    Oppenheimer (2023)",
+        "desc": "Video: 720p | BDRip | IMAX",
+        "poster": "https://i.ibb.co/spZ0XvBV/photo.jpg",
+        "video_id": "46"
     }
 }
