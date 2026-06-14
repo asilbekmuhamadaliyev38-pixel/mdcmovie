@@ -106,5 +106,11 @@
         "desc": "2026 | 720p",
         "poster": "https://ktla.com/wp-content/uploads/sites/4/2026/04/Michael-movie-poster.png",
         "video_id": "24"
+    },
+    "18": {
+        "name": "U |  IT",
+        "desc": "1080p | uzb",
+        "poster": "AgACAgIAAxkBAAIfQWouAVOSEGiUd3qe14kOZ3jrcozZAAK_I2sbh9dxSQX3CWvT7zUXAQADAgADeQADPAQ",
+        "video_id": "25"
     }
 }
