@@ -148,5 +148,11 @@
         "desc": "Video: 1080p | Blu-Ray",
         "poster": "https://i.ibb.co/b5f09WmV/photo.jpg",
         "video_id": "44"
+    },
+    "25": {
+        "name": "Eslab ko'r    Memento (2000)",
+        "desc": "Video: 1080p | Blu-Ray",
+        "poster": "https://i.ibb.co/jZ3Q1t8C/photo.jpg",
+        "video_id": "45"
     }
 }
