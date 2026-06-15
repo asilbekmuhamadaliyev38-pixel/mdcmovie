@@ -32,7 +32,8 @@ REPO_NAME = "asilbekmuhamadaliyev38-pixel/mdcmovie"
 admins = {ADMIN_ID}
 movies = {}      
 channels = {"@mdcmovie": "MDC Movie"}  
-users = set()           
+users = set()
+ad_post_id = None  # Reklama post ID
 daily_users = {}       
 
 # admin_states: user_id -> None yoki state string yoki "user_mode"
@@ -97,6 +98,11 @@ def load_data():
         with open("new_movies_temp.json", "r", encoding="utf-8") as f:
             try: new_movies_temp = {int(k): v for k, v in json.load(f).items()}
             except Exception: new_movies_temp = {}
+    global ad_post_id
+    if os.path.exists("ad_post.json"):
+        with open("ad_post.json", "r", encoding="utf-8") as f:
+            try: ad_post_id = json.load(f).get("id")
+            except Exception: ad_post_id = None
 
 def save_data_local():
     with open("movies.json", "w", encoding="utf-8") as f:
@@ -114,6 +120,8 @@ def save_data_local():
         json.dump(admin_states, f, ensure_ascii=False, indent=4)
     with open("new_movies_temp.json", "w", encoding="utf-8") as f:
         json.dump(new_movies_temp, f, ensure_ascii=False, indent=4)
+    with open("ad_post.json", "w", encoding="utf-8") as f:
+        json.dump({"id": ad_post_id}, f, ensure_ascii=False)
 
 def push_file_to_github(filename, commit_message):
     """Bitta faylni GitHub'ga yuklaydi"""
@@ -178,13 +186,13 @@ def get_admin_keyboard(user_id):
             ["➕ Kino qo'shish", "🗑️ Kino o'chirish"],
             ["📊 Statistika", "📋 Kodlar ro'yxati"],
             ["⚙️ Kanallarni boshqarish", "👑 Adminlarni boshqarish"],
-            ["📣 Hammaga xabar yuborish"]
+            ["📣 Hammaga xabar yuborish", "📢 Reklama xabar"]
         ], resize_keyboard=True)
     else:
         return ReplyKeyboardMarkup([
             ["➕ Kino qo'shish", "🗑️ Kino o'chirish"],
             ["📊 Statistika", "📋 Kodlar ro'yxati"],
-            ["⚙️ Kanallarni boshqarish"]
+            ["⚙️ Kanallarni boshqarish", "📢 Reklama xabar"]
         ], resize_keyboard=True)
 
 def get_user_keyboard():
@@ -273,14 +281,27 @@ async def send_movie_by_code(chat_id, movie_code, bot, context):
         ]])
         for pid in pids:
             try:
+                is_admin_user = is_admin(chat_id)
                 await bot.copy_message(
                     chat_id=chat_id,
                     from_chat_id=SOURCE_CHANNEL,
                     message_id=int(pid),
-                    reply_markup=kino_inline_kb
+                    reply_markup=kino_inline_kb,
+                    protect_content=not is_admin_user
                 )
             except Exception:
                 await bot.send_message(chat_id=chat_id, text="❌ Film o'chirilgan yoki bot kanalda admin emas.")
+        # Reklama postini yuborish (faqat oddiy foydalanuvchilarga)
+        if ad_post_id and not is_admin(chat_id):
+            try:
+                await bot.copy_message(
+                    chat_id=chat_id,
+                    from_chat_id=SOURCE_CHANNEL,
+                    message_id=int(ad_post_id),
+                    protect_content=True
+                )
+            except Exception:
+                pass
         return True
     return False
 
@@ -513,6 +534,30 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
+    elif state == "waiting_ad_post":
+        global ad_post_id
+        if not text.lstrip("-").isdigit():
+            await update.message.reply_text(
+                "❌ Faqat raqam yuboring (Post ID):",
+                reply_markup=get_cancel_keyboard()
+            )
+            return
+        if text == "0":
+            ad_post_id = None
+            admin_states[user_id] = None
+            save_data_local()
+            push_file_to_github("ad_post.json", "Bot: Reklama o'chirildi")
+            await update.message.reply_text("✅ Reklama o'chirildi.")
+            await go_to_main_panel(update, user_id)
+        else:
+            ad_post_id = text
+            admin_states[user_id] = None
+            save_data_local()
+            push_file_to_github("ad_post.json", "Bot: Reklama yangilandi")
+            await update.message.reply_text(f"✅ Reklama o'rnatildi! Post ID: {ad_post_id}")
+            await go_to_main_panel(update, user_id)
+        return
+
     # Tasdiqlash kutilmoqda — faqat callback tugmasini bosish kerak
     elif state == "waiting_confirm_movie":
         await update.message.reply_text(
@@ -603,6 +648,19 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             )
             return
 
+        elif text == "📢 Reklama xabar":
+            current_ad = f"Hozirgi reklama Post ID: {ad_post_id}" if ad_post_id else "Hozircha reklama yo'q"
+            admin_states[user_id] = "waiting_ad_post"
+            save_data_local()
+            await update.message.reply_text(
+                f"📢 Reklama xabar sozlamasi\n\n"
+                f"{current_ad}\n\n"
+                f"Kanaldan reklama postning ID raqamini yuboring.\n"
+                f"(O'chirish uchun 0 yuboring)",
+                reply_markup=get_cancel_keyboard()
+            )
+            return
+
         elif text == "👑 Adminlarni boshqarish" and is_main_admin(user_id):
             admin_list = "\n".join([f"• {a_id}" for a_id in admins if a_id != ADMIN_ID]) or "Hozircha yo'q"
             kb = InlineKeyboardMarkup([
@@ -615,8 +673,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
         # Hech qaysi tugma emas — noma'lum xabar
         await update.message.reply_text(
-            "⚠️ Siz admin rejimidasiz!\n"
-            "Kinoni kod orqali qidirish uchun '👤 Foydalanuvchi rejimiga o'tish' tugmasini bosing.",
+            "⚠️ Siz adminsiz! Botni tekshirish uchun boshqa akkountdan foydalaning.",
             reply_markup=get_admin_keyboard(user_id)
         )
 
@@ -724,13 +781,23 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         kb = []
         for ch_id, ch_name in channels.items():
+            # Asosiy kanal — faqat asosiy admin ko'ra oladi
+            if ch_id == "@mdcmovie" and not is_main_admin(user_id):
+                continue
             kb.append([InlineKeyboardButton(f"🗑️ {ch_name} ({ch_id})", callback_data=f"remove_channel_{ch_id}")])
+        if not kb:
+            await query.answer("❌ O'chirishga ruxsat yo'q!", show_alert=True)
+            return
         kb.append([InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_to_main")])
         await query.message.edit_text("👇 O'chirmoqchi bo'lgan kanalni tanlang:", reply_markup=InlineKeyboardMarkup(kb))
         return
 
     elif data.startswith("remove_channel_"):
         ch_id_to_remove = data[len("remove_channel_"):]
+        # Asosiy kanalni faqat asosiy admin o'chira oladi
+        if ch_id_to_remove == "@mdcmovie" and not is_main_admin(user_id):
+            await query.answer("❌ Bu kanalni o'chirishga ruxsatingiz yo'q!", show_alert=True)
+            return
         if ch_id_to_remove in channels:
             ch_name = channels.pop(ch_id_to_remove)
             save_data_local()
