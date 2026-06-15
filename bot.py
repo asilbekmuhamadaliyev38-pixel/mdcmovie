@@ -406,14 +406,27 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         parts = text.split(" ", 1)
         if len(parts) < 2:
             await update.message.reply_text(
-                "❌ Format xato!\nTo'g'ri format: @kanal_username Kanal Nomi",
+                "❌ Format xato!\nTo'g'ri format:\n"
+                "@username Kanal Nomi\n"
+                "yoki\n"
+                "-1001234567890 Kanal Nomi",
                 reply_markup=get_cancel_keyboard()
             )
             return
-        channels[parts[0]] = parts[1]
+        ch_id = parts[0].strip()
+        ch_name = parts[1].strip()
+        # @ bilan boshlanmasa va raqam bo'lsa, to'g'ri format
+        if not ch_id.startswith("@") and not (ch_id.lstrip("-").isdigit()):
+            await update.message.reply_text(
+                "❌ Kanal ID noto'g'ri!\n"
+                "@username yoki -100... ID kiriting:",
+                reply_markup=get_cancel_keyboard()
+            )
+            return
+        channels[ch_id] = ch_name
         admin_states[user_id] = None
         save_data_local()
-        await update.message.reply_text(f"✅ Kanal qo'shildi: {parts[1]}")
+        await update.message.reply_text(f"✅ Kanal qo'shildi: {ch_name} ({ch_id})")
         await go_to_main_panel(update, user_id)
         return
 
@@ -689,9 +702,12 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_data_local()
         await query.message.edit_text(
             "➕ Yangi kanal qo'shish:\n\n"
-            "Format: @kanal_username Kanal Nomi\n"
+            "Public kanal:\n"
+            "@username Kanal Nomi\n"
             "Misol: @mdcmovie MDC Movie\n\n"
-            "Yoki bekor qilish uchun:",
+            "Private kanal (ID):\n"
+            "-1001234567890 Kanal Nomi\n\n"
+            "💡 Kanal ID ni bilish uchun @getmyid_bot dan foydalaning",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("❌ Bekor qilish", callback_data="cancel_to_main")
             ]])
