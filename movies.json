@@ -178,5 +178,11 @@
         "desc": "Video: 1080p | Blu-Ray | IMAX",
         "poster": "https://i.ibb.co/p6NSB5D1/photo.jpg",
         "video_id": "49"
+    },
+    "30": {
+        "name": "Frankenshteyn (2025)",
+        "desc": "Video: 1080p | WEB-DL",
+        "poster": "https://i.ibb.co/TMrYhkH8/photo.jpg",
+        "video_id": "50"
     }
 }
