@@ -143,6 +143,8 @@ def push_file_to_github(filename, commit_message):
 def push_to_github():
     """Asosiy fayllarni GitHub'ga yuklaydi"""
     push_file_to_github("movies.json", "Bot: Kinolar bazasi yangilandi")
+    push_file_to_github("channels.json", "Bot: Kanallar yangilandi")
+    push_file_to_github("admins.json", "Bot: Adminlar yangilandi")
     push_file_to_github("users.json", "Bot: Foydalanuvchilar yangilandi")
     push_file_to_github("daily_users.json", "Bot: Kunlik statistika yangilandi")
 
@@ -426,6 +428,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         channels[ch_id] = ch_name
         admin_states[user_id] = None
         save_data_local()
+        push_file_to_github("channels.json", "Bot: Kanal qo'shildi")
         await update.message.reply_text(f"✅ Kanal qo'shildi: {ch_name} ({ch_id})")
         await go_to_main_panel(update, user_id)
         return
@@ -462,6 +465,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
         admins.add(new_id)
         admin_states[user_id] = None
         save_data_local()
+        push_file_to_github("admins.json", "Bot: Admin qo'shildi")
         await update.message.reply_text(f"✅ Yangi admin qo'shildi!\nID: {new_id}")
         await go_to_main_panel(update, user_id)
         return
@@ -730,6 +734,7 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if ch_id_to_remove in channels:
             ch_name = channels.pop(ch_id_to_remove)
             save_data_local()
+            push_file_to_github("channels.json", "Bot: Kanal o'chirildi")
             await query.answer(f"✅ {ch_name} o'chirildi!", show_alert=True)
             await query.message.delete()
             await context.bot.send_message(
@@ -802,6 +807,7 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if remove_id in admins and remove_id != ADMIN_ID:
             admins.remove(remove_id)
             save_data_local()
+            push_file_to_github("admins.json", "Bot: Admin o'chirildi")
             await query.answer("✅ Admin o'chirildi!", show_alert=True)
             await query.message.delete()
             await context.bot.send_message(
