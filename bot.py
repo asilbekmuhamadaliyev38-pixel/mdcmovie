@@ -27,7 +27,7 @@ ADMIN_ID = int(os.environ.get("ADMIN_ID", "5837813502"))
 SOURCE_CHANNEL = os.environ.get("SOURCE_CHANNEL", "-1003926152488")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
-REPO_NAME = os.environ.get("REPO_NAME", "asilbekmuhamadaliyev38-pixel/mdcmovie")
+REPO_NAME = os.environ.get("REPO_NAME", "asilbekmuhamadaliyev38-pixel/mega-film-uz")
 
 # ==================== MA'LUMOTLAR ====================
 admins = set()
@@ -38,10 +38,10 @@ daily_users = {}
 admin_states = {}
 new_movies_temp = {}
 ad_post_id = None
+bot_settings = {"protect_content": True} # Standart holatda uzatish yopiq
 
 # ==================== GITHUB ====================
 def github_get(filename):
-    """GitHub'dan fayl yuklab oladi"""
     if not GITHUB_TOKEN:
         return None
     try:
@@ -58,7 +58,6 @@ def github_get(filename):
     return None
 
 def github_put(filename, data, message):
-    """GitHub'ga fayl yuklaydi"""
     if not GITHUB_TOKEN:
         return
     try:
@@ -80,7 +79,6 @@ def github_put(filename, data, message):
         print(f"GitHub put {filename}: {e}")
 
 def read_file(filename, default):
-    """Avval lokal, bo'lmasa GitHub'dan o'qiydi"""
     if os.path.exists(filename):
         try:
             with open(filename, "r", encoding="utf-8") as f:
@@ -96,50 +94,41 @@ def read_file(filename, default):
     return default
 
 def write_local(filename, data):
-    """Lokal faylga yozadi"""
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 def save_and_push(filename, data, message):
-    """Lokal saqlaydi va GitHub'ga yuklaydi"""
     write_local(filename, data)
     github_put(filename, data, message)
 
 # ==================== MA'LUMOT YUKLASH ====================
 def load_data():
-    global admins, movies, channels, users, daily_users, admin_states, new_movies_temp, ad_post_id
+    global admins, movies, channels, users, daily_users, admin_states, new_movies_temp, ad_post_id, bot_settings
 
-    # Kinolar
     movies.update(read_file("movies.json", {}))
-
-    # Kanallar
     ch = read_file("channels.json", {})
     channels.update(ch)
-
-    # Adminlar
+    
     adm = read_file("admins.json", [ADMIN_ID])
     admins.update(set(adm))
-    admins.add(ADMIN_ID)  # Asosiy admin doim bo'lsin
+    admins.add(ADMIN_ID)
 
-    # Foydalanuvchilar
     usr = read_file("users.json", [])
     users.update(set(usr))
 
-    # Kunlik statistika
     daily = read_file("daily_users.json", {})
     daily_users.update({k: set(v) for k, v in daily.items()})
 
-    # Admin holatlari
     states = read_file("admin_states.json", {})
     admin_states.update({int(k): v for k, v in states.items()})
 
-    # Vaqtinchalik kino ma'lumotlar
     temp = read_file("new_movies_temp.json", {})
     new_movies_temp.update({int(k): v for k, v in temp.items()})
 
-    # Reklama
     ad = read_file("ad_post.json", {"id": None})
     ad_post_id = ad.get("id") if isinstance(ad, dict) else None
+    
+    bot_settings.update(read_file("settings.json", {"protect_content": True}))
 
 # ==================== YORDAMCHI FUNKSIYALAR ====================
 def is_main_admin(user_id):
@@ -171,13 +160,15 @@ def get_admin_keyboard(user_id):
             ["➕ Kino qo'shish", "🗑️ Kino o'chirish"],
             ["📊 Statistika", "📋 Kodlar ro'yxati"],
             ["⚙️ Kanallarni boshqarish", "👑 Adminlarni boshqarish"],
-            ["📣 Hammaga xabar", "📢 Reklama xabar"]
+            ["📣 Hammaga xabar", "📢 Reklama xabar"],
+            ["⚙️ Bot Sozlamalari"]
         ], resize_keyboard=True)
     else:
         return ReplyKeyboardMarkup([
             ["➕ Kino qo'shish", "🗑️ Kino o'chirish"],
             ["📊 Statistika", "📋 Kodlar ro'yxati"],
-            ["⚙️ Kanallarni boshqarish", "📢 Reklama xabar"]
+            ["⚙️ Kanallarni boshqarish", "📢 Reklama xabar"],
+            ["⚙️ Bot Sozlamalari"]
         ], resize_keyboard=True)
 
 def get_cancel_keyboard():
@@ -210,7 +201,7 @@ async def get_subscription_keyboard(bot):
 
 # ==================== KINO YUBORISH ====================
 async def send_movie(chat_id, movie_code, bot):
-    global ad_post_id
+    global ad_post_id, bot_settings
     if movie_code not in movies:
         return False
     data = movies[movie_code]
@@ -221,7 +212,10 @@ async def send_movie(chat_id, movie_code, bot):
     kb = InlineKeyboardMarkup([[
         InlineKeyboardButton("🔍 Qidirish", switch_inline_query_current_chat="")
     ]])
+    
     admin_user = is_admin(chat_id)
+    # Agar admin bo'lsa cheklov ishlamaydi, foydalanuvchi bo'lsa sozlamaga qaraydi:
+    protect = False if admin_user else bot_settings.get("protect_content", True)
 
     for vid in video_id:
         try:
@@ -230,13 +224,12 @@ async def send_movie(chat_id, movie_code, bot):
                 from_chat_id=SOURCE_CHANNEL,
                 message_id=int(vid),
                 reply_markup=kb,
-                protect_content=not admin_user
+                protect_content=protect
             )
         except Exception as e:
             print(f"Kino yuborishda xato: {e}")
             await bot.send_message(chat_id=chat_id, text="❌ Film topilmadi yoki bot kanalda admin emas.")
 
-    # Reklama (faqat oddiy foydalanuvchilarga)
     if ad_post_id and not admin_user:
         try:
             await bot.copy_message(
@@ -331,7 +324,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     track_user(user_id)
 
-    # Oddiy foydalanuvchi
     if not is_admin(user_id):
         if not await is_joined(context.bot, user_id):
             await update.message.reply_text(
@@ -344,18 +336,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Bunday kodli kino topilmadi.")
         return
 
-    # ==================== ADMIN ====================
     state = admin_states.get(user_id)
 
-    # Bekor qilish
     if text == "❌ Bekor qilish":
         admin_states[user_id] = None
         new_movies_temp.pop(user_id, None)
         save_states()
         await update.message.reply_text("🏠 Admin paneli", reply_markup=get_admin_keyboard(user_id))
         return
-
-    # --- STATE'LI JARAYONLAR ---
 
     if state == "add_movie":
         lines = [l.strip() for l in text.split("\n") if l.strip()]
@@ -450,8 +438,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Admin qo'shildi! ID: {new_id}", reply_markup=get_admin_keyboard(user_id))
         return
 
-    # --- TUGMALAR (state yo'q) ---
-
     if text == "➕ Kino qo'shish":
         admin_states[user_id] = "add_movie"
         save_states()
@@ -531,6 +517,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if text == "⚙️ Bot Sozlamalari":
+        status = "🔴 BLOKLANGAN (Uzatib bo'lmaydi)" if bot_settings.get("protect_content", True) else "🟢 OCHIQ (Uzatib bo'ladi)"
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Holatni o'zgartirish", callback_data="toggle_protect")],
+            [InlineKeyboardButton("❌ Orqaga", callback_data="cancel_to_main")]
+        ])
+        await update.message.reply_text(
+            f"⚙️ **Bot Sozlamalari Paneli**\n\n"
+            f"Foydalanuvchilar uchun kinoni uzatish/yuklash holati:\n"
+            f"**{status}**\n\n"
+            f"💡 *Eslatma: Adminlarga bu cheklov baribir ta'sir qilmaydi.*",
+            reply_markup=kb,
+            parse_mode="Markdown"
+        )
+        return
+
     await update.message.reply_text(
         "⚠️ Siz adminsiz! Botni tekshirish uchun boshqa akkountdan foydalaning.",
         reply_markup=get_admin_keyboard(user_id)
@@ -538,7 +540,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ==================== CALLBACK ====================
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global ad_post_id
+    global ad_post_id, bot_settings
     query = update.callback_query
     user_id = query.from_user.id
     data = query.data
@@ -572,6 +574,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not is_admin(user_id):
+        return
+
+    if data == "toggle_protect":
+        # Holatni teskarisiga o'zgartiramiz
+        current_state = bot_settings.get("protect_content", True)
+        bot_settings["protect_content"] = not current_state
+        save_and_push("settings.json", bot_settings, "Bot sozlamasi o'zgardi")
+        
+        status = "🔴 BLOKLANGAN (Uzatib bo'lmaydi)" if bot_settings["protect_content"] else "🟢 OCHIQ (Uzatib bo'ladi)"
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Holatni o'zgartirish", callback_data="toggle_protect")],
+            [InlineKeyboardButton("❌ Orqaga", callback_data="cancel_to_main")]
+        ])
+        
+        await query.answer("✅ Sozlama o'zgartirildi!")
+        await query.message.edit_text(
+            f"⚙️ **Bot Sozlamalari Paneli**\n\n"
+            f"Foydalanuvchilar uchun kinoni uzatish/yuklash holati:\n"
+            f"**{status}**\n\n"
+            f"💡 *Eslatma: Adminlarga bu cheklov baribir ta'sir qilmaydi.*",
+            reply_markup=kb,
+            parse_mode="Markdown"
+        )
         return
 
     if data == "confirm_save_movie":
@@ -634,21 +659,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         kb = []
         for ch_id, ch_name in channels.items():
-            if not is_main_admin(user_id) and ch_id == "@mdcmovie":
-                continue
             kb.append([InlineKeyboardButton(f"🗑️ {ch_name} ({ch_id})", callback_data=f"delch_{ch_id}")])
-        if not kb:
-            await query.answer("❌ O'chirishga ruxsat yo'q!", show_alert=True)
-            return
         kb.append([InlineKeyboardButton("❌ Bekor", callback_data="cancel_to_main")])
         await query.message.edit_text("O'chirmoqchi bo'lgan kanalni tanlang:", reply_markup=InlineKeyboardMarkup(kb))
         return
 
     if data.startswith("delch_"):
         ch_id = data[6:]
-        if not is_main_admin(user_id) and ch_id == "@mdcmovie":
-            await query.answer("❌ Ruxsat yo'q!", show_alert=True)
-            return
         if ch_id in channels:
             ch_name = channels.pop(ch_id)
             save_and_push("channels.json", channels, "Kanal o'chirildi")
@@ -682,20 +699,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text("O'chirmoqchi bo'lgan adminni tanlang:", reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    if data.startswith("deladm_") and is_main_admin(user_id):
-        rem_id = int(data[7:])
-        if rem_id in admins and rem_id != ADMIN_ID:
-            admins.discard(rem_id)
-            save_and_push("admins.json", list(admins), "Admin o'chirildi")
-            await query.answer("✅ Admin o'chirildi!", show_alert=True)
-            await query.message.delete()
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text=f"✅ Admin o'chirildi! ID: {rem_id}",
-                reply_markup=get_admin_keyboard(user_id)
-            )
-        return
-
     if data == "broadcast_confirm" and is_main_admin(user_id):
         msg_text = context.user_data.get("broadcast_text", "")
         if not msg_text:
@@ -721,6 +724,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=f"✅ Yuborildi!\n📨 Muvaffaqiyatli: {success}\n❌ Yuborilmadi: {failed}",
             reply_markup=get_admin_keyboard(user_id)
         )
+        return
+
+    if data.startswith("deladm_") and is_main_admin(user_id):
+        rem_id = int(data[7:])
+        if rem_id in admins and rem_id != ADMIN_ID:
+            admins.discard(rem_id)
+            save_and_push("admins.json", list(admins), "Admin o'chirildi")
+            await query.answer("✅ Admin o'chirildi!", show_alert=True)
+            await query.message.delete()
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=f"✅ Admin o'chirildi! ID: {rem_id}",
+                reply_markup=get_admin_keyboard(user_id)
+            )
         return
 
 # ==================== ISHGA TUSHIRISH ====================
