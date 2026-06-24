@@ -105,7 +105,10 @@
     "name": "Dyunkerk        Dunkirk (2017)",
     "desc": "Video: 1080p | Blu-Ray | IMAX",
     "poster": "https://i.ibb.co/N6mb94RK/photo.jpg",
-    "video_id": "42"
+    "video_id": "42",
+    "genres": [
+      "Urush"
+    ]
   },
   "34": {
     "name": "Kong: Bosh chanoq oroli",
