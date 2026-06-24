@@ -1,4 +1,6 @@
 {
-  "protect_content": true,
+  "protect_content": false,
+  "start_media_type": "text",
+  "start_file_id": null,
   "start_text": "👋 Assalomu alaykum {name}, botimizga xush kelibsiz\n\n🎥 Bot orqali siz sevimli filmlar, seriallar va multfilmlarni sifatli formatda ko'rishingiz mumkin\n\n🚀 Shunchaki:\n— Kino yoki serialning kodini yuboring\n— Pastdagi bo'limlardan birini tanlang va zavqlaning! 😉"
 }
