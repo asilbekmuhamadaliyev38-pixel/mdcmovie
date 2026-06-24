@@ -212,7 +212,9 @@ def set_rating(movie_code, user_id, score):
     if movie_code not in ratings:
         ratings[movie_code] = {}
     ratings[movie_code][str(user_id)] = score
-    queue_save("ratings.json", ratings, f"Reyting yangilandi: {movie_code}")
+    # Reyting kamdan-kam o'zgaradi (har user bir marta bosadi), shu sababli
+    # darhol GitHub'ga yuboramiz - navbatga qoldirmaymiz, restart bo'lsa ham yo'qolmasin.
+    save_and_push("ratings.json", ratings, f"Reyting yangilandi: {movie_code}")
 
 def get_avg_rating(movie_code):
     scores = ratings.get(movie_code, {})
@@ -515,9 +517,9 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
         match = False
         if filter_type == "catalog":
-            if not filter_value or any(filter_value in c for c in movie_cats): match = True
+            if not filter_value or filter_value in movie_cats: match = True
         elif filter_type == "genre":
-            if not filter_value or any(filter_value in g for g in movie_gnrs): match = True
+            if not filter_value or filter_value in movie_gnrs: match = True
         elif filter_type == "top":
             match = True
         else:
@@ -952,11 +954,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         avg, count = get_avg_rating(movie_code)
         user_score = get_user_rating(movie_code, user_id)
         kb_rows = []
-        row = []
         for i in range(1, 6):
-            mark = "✅" if user_score == i else ""
-            row.append(InlineKeyboardButton(f"{mark}{'⭐'*i}", callback_data=f"rate_{movie_code}_{i}"))
-        kb_rows.append(row)
+            mark = "✅ " if user_score == i else ""
+            label = f"{mark}{i} {'⭐' * i}"
+            kb_rows.append([InlineKeyboardButton(label, callback_data=f"rate_{movie_code}_{i}")])
         kb = InlineKeyboardMarkup(kb_rows)
         info = f"{stars_str(avg)} ({avg:.1f}/5, {count} ovoz)" if count else "Hali baholanmagan"
         await context.bot.send_message(
