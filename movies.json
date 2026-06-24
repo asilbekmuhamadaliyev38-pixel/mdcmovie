@@ -143,16 +143,16 @@
       "Action",
       "Fantastika",
       "Sarguzasht"
-    ],
-    "catalogs": [
-      "kinolar"
     ]
   },
   "37": {
     "name": "Godzila Kongga qarshi      Godzilla vs Kong",
     "desc": "1080p        Uzb",
     "poster": "https://i.ibb.co/gLr3SYj6/photo.jpg",
-    "video_id": "57"
+    "video_id": "57",
+    "catalogs": [
+      "kinolar"
+    ]
   },
   "38": {
     "name": "Godzilla va Kong: Yangi imperiya       Godzilla x Kong: The New Empire",
