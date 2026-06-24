@@ -163,7 +163,10 @@
     "name": "Godzilla va Kong: Yangi imperiya       Godzilla x Kong: The New Empire",
     "desc": "1080p Uzb",
     "poster": "https://i.ibb.co/Kx61yt7W/photo.jpg",
-    "video_id": "58"
+    "video_id": "58",
+    "genres": [
+      "Fantastika"
+    ]
   },
   "40": {
     "name": "Wall street bo'risi   the wolf of wall street",
