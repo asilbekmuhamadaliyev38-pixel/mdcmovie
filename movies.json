@@ -95,7 +95,10 @@
     "name": "Following (1998)",
     "desc": "Video: 720p | Blu-Ray",
     "poster": "https://i.ibb.co/sp3cbtCF/photo.jpg",
-    "video_id": "41"
+    "video_id": "41",
+    "genres": [
+      "Triller"
+    ]
   },
   "22": {
     "name": "Dyunkerk        Dunkirk (2017)",
