@@ -186,7 +186,10 @@
     "name": "Ajdar Uyi 3-fasl",
     "desc": "Kanal",
     "poster": "https://i.ibb.co/G3nQNW8F/photo.jpg",
-    "video_id": "63"
+    "video_id": "63",
+    "genres": [
+      "Fantastika"
+    ]
   },
   "42": {
     "name": "O'yinchoqlar tarixi 5",
