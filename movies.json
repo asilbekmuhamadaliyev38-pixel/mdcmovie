@@ -42,7 +42,10 @@
     "name": "O'rgimchak-odam Uyga yo'l yo'q    Spider-Man: No Way Home",
     "desc": "1080p uzb",
     "poster": "https://img.kinochilar.com/uploads/posts/2023-10/1647208539-359326886-chelovek-pauk-net-puti-domoy.jpg",
-    "video_id": "10"
+    "video_id": "10",
+    "genres": [
+      "Fantastika"
+    ]
   },
   "2138": {
     "name": "Orqa xonalar",
