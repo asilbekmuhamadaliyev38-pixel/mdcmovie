@@ -169,17 +169,20 @@ def get_user_inline_keyboard():
             InlineKeyboardButton("📂 Katalog", callback_data="user_show_catalogs"),
             InlineKeyboardButton("🎭 Janr", callback_data="user_show_genres")
         ],
-        [InlineKeyboardButton("❤️ Saqlangan kinolarim", callback_data="my_saved")]
+        [
+            InlineKeyboardButton("🔥 Top kinolar", switch_inline_query_current_chat="top"),
+            InlineKeyboardButton("❤️ Saqlanganlar", callback_data="my_saved")
+        ]
     ])
 
 def get_admin_keyboard():
     return ReplyKeyboardMarkup([
         ["➕ Kino qo'shish", "✏️ Kino tahrirlash"],
-        ["🗑️ Kino o'chirish", "📈 Top kinolar"],
-        ["📁 Katalog/Janr", "📊 Statistika"],
-        ["📣 Hammaga xabar", "📢 Reklama xabar"],
-        ["🚫 Foydalanuvchi blok", "📋 Admin loglar"],
-        ["⚙️ Bot Sozlamalari"]
+        ["🗑️ Kino o'chirish", "📋 Kinolar ro'yxati"],
+        ["📈 Top kinolar", "📁 Katalog/Janr"],
+        ["📊 Statistika", "📢 Reklama xabar"],
+        ["📣 Hammaga xabar", "🚫 Foydalanuvchi blok"],
+        ["📝 Admin loglar", "⚙️ Bot Sozlamalari"]
     ], resize_keyboard=True)
 
 def get_cancel_keyboard():
@@ -324,6 +327,9 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     elif query.startswith("janr:"):
         filter_type = "genre"
         filter_value = query.replace("janr:", "").strip().lower()
+    elif query == "top":
+        filter_type = "top"
+        filter_value = None
 
     results = []
     for code, data in reversed(list(movies.items())):
@@ -341,6 +347,8 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             if not filter_value or any(filter_value in c for c in movie_cats): match = True
         elif filter_type == "genre":
             if not filter_value or any(filter_value in g for g in movie_gnrs): match = True
+        elif filter_type == "top":
+            match = True  # hammasi kiradi, keyin sort qilinadi
         else:
             if not query or query in name.lower() or query in str(code).lower() or query in desc.lower(): match = True
 
@@ -352,6 +360,11 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 thumbnail_url=poster,
                 input_message_content=InputTextMessageContent(message_text=str(code))
             ))
+
+    # Top rejimida eng ko'p ko'rilgan bo'yicha sort
+    if filter_type == "top":
+        results.sort(key=lambda r: views.get(r.id, 0), reverse=True)
+        results = results[:20]
 
     await update.inline_query.answer(results[:50], cache_time=0)
 
@@ -635,13 +648,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if text == "📋 Admin loglar":
+    if text == "📋 Kinolar ro'yxati":
+        if not movies:
+            await update.message.reply_text("🎬 Bazada hech qanday kino yo'q.")
+            return
+        lines_list = []
+        for code, d in movies.items():
+            name = d.get("name", code).upper() if isinstance(d, dict) else code.upper()
+            vc = views.get(code, 0)
+            lines_list.append(f"🔑 {code} — {name} 👁{vc}")
+        msg = f"🎬 Kinolar ro'yxati ({len(movies)} ta):\n\n" + "\n".join(lines_list[:50])
+        await update.message.reply_text(msg)
+        return
+
+    if text == "📝 Admin loglar":
         if not admin_logs:
             await update.message.reply_text("Loglar yo'q.")
             return
         last = admin_logs[-20:][::-1]
         lines = [f"🕐 {l['time']}\n👤 {l['admin']}: {l['action']}" for l in last]
-        await update.message.reply_text("📋 Oxirgi 20 ta amal:\n\n" + "\n\n".join(lines))
+        await update.message.reply_text("📝 Oxirgi 20 ta amal:\n\n" + "\n\n".join(lines))
         return
 
     if text == "⚙️ Bot Sozlamalari":
@@ -686,24 +712,37 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
         uid_str = str(user_id)
         saved = saved_movies.get(uid_str, [])
-        if not saved:
-            await context.bot.send_message(chat_id=user_id, text="❤️ Siz hali hech qanday kino saqlamagansiz.\n\nKinoni ko'rayotganda '❤️ Saqlash' tugmasini bosing!")
-            return
-        results = []
-        for code in saved:
-            if code in movies:
-                d = movies[code]
-                name = d.get("name", code) if isinstance(d, dict) else code
-                results.append(f"🎬 {name.upper()} — kod: {code}")
-        if results:
-            kb = InlineKeyboardMarkup([[InlineKeyboardButton("🗑️ Ro'yxatni tozalash", callback_data="clear_saved")]])
+        valid = [c for c in saved if c in movies]
+        if not valid:
             await context.bot.send_message(
                 chat_id=user_id,
-                text="❤️ Saqlangan kinolaringiz:\n\n" + "\n".join(results) + "\n\nKodini yuboring va kino keladi!",
-                reply_markup=kb
+                text="❤️ Siz hali hech qanday kino saqlamagansiz.\n\nKinoni ko'rayotganda '❤️ Saqlash' tugmasini bosing!"
             )
-        else:
-            await context.bot.send_message(chat_id=user_id, text="❤️ Saqlangan kinolaringiz o'chirilgan yoki topilmadi.")
+            return
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"❤️ Saqlangan kinolaringiz ({len(valid)} ta):\n\nQuyidagi tugmalardan birini bosing:"
+        )
+        for code in valid:
+            d = movies[code]
+            name = d.get("name", code).upper() if isinstance(d, dict) else code.upper()
+            desc = d.get("desc", "") if isinstance(d, dict) else ""
+            poster = d.get("poster") if isinstance(d, dict) else None
+            vc = views.get(code, 0)
+            kb = InlineKeyboardMarkup([[
+                InlineKeyboardButton("▶️ Ko'rish", callback_data=f"watch_{code}"),
+                InlineKeyboardButton("🗑️ O'chirish", callback_data=f"unsave_{code}")
+            ]])
+            caption = f"🎬 {name}\n📝 {desc}\n👁 {vc} marta ko'rilgan\n🔑 Kod: {code}"
+            try:
+                if poster and poster.startswith("http"):
+                    await context.bot.send_photo(chat_id=user_id, photo=poster, caption=caption, reply_markup=kb)
+                else:
+                    await context.bot.send_message(chat_id=user_id, text=caption, reply_markup=kb)
+            except Exception:
+                await context.bot.send_message(chat_id=user_id, text=caption, reply_markup=kb)
+        clear_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🗑️ Hammasini o'chirish", callback_data="clear_saved")]])
+        await context.bot.send_message(chat_id=user_id, text="———", reply_markup=clear_kb)
         return
 
     if data.startswith("save_"):
@@ -717,6 +756,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❤️ Saqlandi!", show_alert=False)
         else:
             await query.answer("✅ Bu kino allaqachon saqlanган!", show_alert=False)
+        return
+
+    if data.startswith("watch_"):
+        code = data[6:]
+        await query.answer()
+        if not await is_joined(context.bot, user_id):
+            await context.bot.send_message(
+                chat_id=user_id, text="❗ Avval kanallarga obuna bo'ling!",
+                reply_markup=await get_subscription_keyboard(context.bot)
+            )
+            return
+        if not await send_movie(user_id, code, context.bot):
+            await context.bot.send_message(chat_id=user_id, text="❌ Kino topilmadi.")
+        return
+
+    if data.startswith("unsave_"):
+        code = data[7:]
+        uid_str = str(user_id)
+        if uid_str in saved_movies and code in saved_movies[uid_str]:
+            saved_movies[uid_str].remove(code)
+            save_and_push("saved_movies.json", saved_movies, "Saqlangan kino o'chirildi")
+        await query.answer("🗑️ O'chirildi!", show_alert=False)
+        await query.message.delete()
         return
 
     if data == "clear_saved":
