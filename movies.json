@@ -118,7 +118,10 @@
     "name": "Kong: Bosh chanoq oroli",
     "desc": "1080p uzb",
     "poster": "https://i.ibb.co/MkwQBbxD/photo.jpg",
-    "video_id": "54"
+    "video_id": "54",
+    "genres": [
+      "Action"
+    ]
   },
   "36": {
     "name": "O'yinchoqlar tarixi 5",
