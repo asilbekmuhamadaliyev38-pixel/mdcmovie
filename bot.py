@@ -1251,12 +1251,21 @@ def keep_alive_loop():
 
 def main():
     load_data()
-    if not TOKEN: return
+    if not TOKEN: 
+        print("XATO: TOKEN topilmadi!")
+        return
     
+    # Soxta serverni Render portni tekshirishidan oldin tayyorlash
+    print("Soxta server ishga tushmoqda...")
     threading.Thread(target=run_fake_server, daemon=True).start()
+
+    # Avto-bekap oqimi
     threading.Thread(target=auto_backup_loop, daemon=True).start()
+
+    # Keep-alive oqimi
     threading.Thread(target=keep_alive_loop, daemon=True).start()
     
+    print("Telegram Bot ulanmoqda...")
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
