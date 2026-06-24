@@ -69,7 +69,10 @@
     "name": "Michael",
     "desc": "2026 | 720p",
     "poster": "https://ktla.com/wp-content/uploads/sites/4/2026/04/Michael-movie-poster.png",
-    "video_id": "24"
+    "video_id": "24",
+    "genres": [
+      "Drama"
+    ]
   },
   "20": {
     "name": "Qora ritsar: Afsonaning qaytishi                      The Dark Knight Rises (2012)",
