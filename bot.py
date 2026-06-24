@@ -1036,9 +1036,22 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     pass
 
+import threading
+from http.server import SimpleHTTPRequestHandler, HTTPServer
+
+# Render port so'ragani uchun soxta veb-server (Render o'chirib qo'ymasligi uchun)
+def run_fake_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), SimpleHTTPRequestHandler)
+    server.serve_forever()
+
 def main():
     load_data()
     if not TOKEN: return
+    
+    # Soxta serverni alohida oqimda fonda ishga tushiramiz
+    threading.Thread(target=run_fake_server, daemon=True).start()
+    
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
