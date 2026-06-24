@@ -442,9 +442,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         admin_states[user_id] = None
         data = movies[code]
-        name = data.get("name", code) if isinstance(data, dict) else code
-        cur_cats = movies[code].get("catalogs", []) if isinstance(movies[code], dict) else []
-        cur_gnrs = movies[code].get("genres", []) if isinstance(movies[code], dict) else []
+        
+        if not isinstance(data, dict):
+            movies[code] = {"name": f"Kino {code}", "desc": "", "poster": "", "video_id": data, "catalogs": [], "genres": []}
+            data = movies[code]
+
+        name = data.get("name", code)
+        cur_cats = data.get("catalogs", [])
+        cur_gnrs = data.get("genres", [])
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("📛 Nom", callback_data=f"edit_name_{code}"),
              InlineKeyboardButton("📝 Ma'lumot", callback_data=f"edit_desc_{code}")],
@@ -467,10 +472,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         field = parts[2]
         code = parts[3]
         if code in movies:
+            if not isinstance(movies[code], dict):
+                movies[code] = {"name": f"Kino {code}", "desc": "", "poster": "", "video_id": movies[code], "catalogs": [], "genres": []}
+            
             if field == "name": movies[code]["name"] = text
             elif field == "desc": movies[code]["desc"] = text
             elif field == "poster": movies[code]["poster"] = text
             elif field == "vid": movies[code]["video_id"] = text
+            
             save_and_push("movies.json", movies, f"Kino tahrirlandi: {code}")
             add_log(user_id, f"Kino tahrirlandi: {code} ({field})")
             admin_states[user_id] = None
@@ -678,7 +687,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("📝 Start matnini o'zgartirish", callback_data="edit_start")],
             [InlineKeyboardButton("📢 Majburiy kanallar", callback_data="manage_ch")]
         ])
-        await update.message.reply_text("⚙️ Bot sozlamalari:", reply_markup=kb)
+        await update.message.reply_text("⚙️ Bot sozalamalari:", reply_markup=kb)
         await update.message.reply_text("Qaytish:", reply_markup=get_return_main_keyboard())
         return
 
@@ -790,6 +799,68 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not is_admin(user_id): return
 
+    # TAHRIRLASH INLINE HANDLING
+    if data.startswith("edit_name_") or data.startswith("edit_desc_") or data.startswith("edit_poster_") or data.startswith("edit_vid_"):
+        await query.answer()
+        parts = data.split("_", 2)
+        field = parts[1]
+        code = parts[2]
+        admin_states[user_id] = f"edit_field_{field}_{code}"
+        await context.bot.send_message(chat_id=user_id, text=f"📝 Yangi qiymatni kiriting:", reply_markup=get_cancel_keyboard())
+        return
+
+    if data.startswith("edit_cats_"):
+        await query.answer()
+        code = data.split("_")[2]
+        kb = [[InlineKeyboardButton(f"➕/➖ {cat}", callback_data=f"tgl_cat_{code}_{i}")] for i, cat in enumerate(catalogs)]
+        kb.append([InlineKeyboardButton("✅ Tayyor", callback_data="cancel_edit")])
+        await query.message.edit_text("📂 Kataloglarni boshqarish:", reply_markup=InlineKeyboardMarkup(kb))
+        return
+
+    if data.startswith("tgl_cat_"):
+        await query.answer()
+        parts = data.split("_")
+        code = parts[2]
+        idx = int(parts[3])
+        cat_name = catalogs[idx]
+        if code in movies:
+            if "catalogs" not in movies[code]: movies[code]["catalogs"] = []
+            if cat_name in movies[code]["catalogs"]:
+                movies[code]["catalogs"].remove(cat_name)
+            else:
+                movies[code]["catalogs"].append(cat_name)
+            save_and_push("movies.json", movies, f"Katalog tahrirlandi: {code}")
+        return
+
+    if data.startswith("edit_gnrs_"):
+        await query.answer()
+        code = data.split("_")[2]
+        kb = [[InlineKeyboardButton(f"➕/➖ {gen}", callback_data=f"tgl_gen_{code}_{i}")] for i, gen in enumerate(genres)]
+        kb.append([InlineKeyboardButton("✅ Tayyor", callback_data="cancel_edit")])
+        await query.message.edit_text("🎭 Janrlarni boshqarish:", reply_markup=InlineKeyboardMarkup(kb))
+        return
+
+    if data.startswith("tgl_gen_"):
+        await query.answer()
+        parts = data.split("_")
+        code = parts[2]
+        idx = int(parts[3])
+        gen_name = genres[idx]
+        if code in movies:
+            if "genres" not in movies[code]: movies[code]["genres"] = []
+            if gen_name in movies[code]["genres"]:
+                movies[code]["genres"].remove(gen_name)
+            else:
+                movies[code]["genres"].append(gen_name)
+            save_and_push("movies.json", movies, f"Janr tahrirlandi: {code}")
+        return
+
+    if data == "cancel_edit":
+        await query.answer()
+        await query.message.edit_text("✅ Tahrirlash tugatildi.", reply_markup=None)
+        await context.bot.send_message(chat_id=user_id, text="Asosiy panel:", reply_markup=get_admin_keyboard())
+        return
+
     if data == "add_cat":
         await query.answer()
         admin_states[user_id] = "add_custom_catalog"
@@ -897,18 +968,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 add_log(user_id, f"Kino qo'shildi: {wiz['name']} ({code})")
                 admin_states[user_id] = None
                 
-                # ================= O'ZGARTIRILGAN QISMI =================
-                # Avtomatik xabar yuborilmaydi. Admin so'rovnomasi chiqadi:
                 kb_confirm = InlineKeyboardMarkup([
                     [InlineKeyboardButton("✅ Ha (Yuborilsin)", callback_data=f"alert_new_{code}")],
                     [InlineKeyboardButton("❌ Yo'q (Shart emas)", callback_data="alert_cancel")]
                 ])
                 await query.message.edit_text(
                     f"🎉 '{wiz['name']}' kinosi muvaffaqiyatli qo'shildi!\n\n"
-                    f"📢 Ushbu yangi kino haqida barcha foydalanuvchilarga xabar berilsinmi?",
+                    f"📢 Ushbu yangi kino haqica barcha foydalanuvchilarga xabar berilsinmi?",
                     reply_markup=kb_confirm
                 )
-                # ========================================================
         else:
             idx = int(val)
             gen_name = genres[idx]
@@ -918,7 +986,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await query.answer(f"➕ {gen_name} qo'shildi")
         return
 
-    # ================= YANGI CALLBACK HANDLERLAR =================
     if data.startswith("alert_new_"):
         await query.answer()
         movie_code = data.split("_")[2]
@@ -945,7 +1012,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("Xabar bekor qilindi")
         await query.message.edit_text("✅ Tushunarli. Foydalanuvchilarga bildirishnoma yuborilmadi.", reply_markup=get_admin_keyboard())
         return
-    # ============================================================
 
     if data == "broadcast_confirm":
         await query.answer()
