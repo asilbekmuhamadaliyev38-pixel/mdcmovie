@@ -56,7 +56,10 @@
     "name": "Orqa xonalar",
     "desc": "uzmovi",
     "poster": "https://uae.voxcinemas.com/images/Backrooms_3331e42690.png?w=1920&q=85&fm=webp",
-    "video_id": "23"
+    "video_id": "23",
+    "catalogs": [
+      "2026-yil filmlari"
+    ]
   },
   "17": {
     "name": "Michael",
