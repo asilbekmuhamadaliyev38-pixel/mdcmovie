@@ -3,7 +3,10 @@
     "name": "O'rgimchak Noir",
     "desc": "uzb",
     "poster": "https://cdn.marvel.com/content/2x/tease_art_combo.webp",
-    "video_id": "6"
+    "video_id": "6",
+    "catalogs": [
+      "seriallar"
+    ]
   },
   "6": {
     "name": "O'rgimchak Odam: Uyga qaytish     Spider-Man: Homecoming",
