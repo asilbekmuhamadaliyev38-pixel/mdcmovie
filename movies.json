@@ -243,5 +243,20 @@
       "Sarguzasht",
       "Drama"
     ]
+  },
+  "44": {
+    "name": "O'yinchoqlar tarixi 5",
+    "desc": "O'zbek tilida   1080P",
+    "poster": "https://i.ibb.co/N2sbYWRr/photo.jpg",
+    "video_id": "68",
+    "catalogs": [
+      "2026-yil filmlari",
+      "multfilmlar"
+    ],
+    "genres": [
+      "Sarguzasht",
+      "Animatsion",
+      "Fantastika"
+    ]
   }
 }
