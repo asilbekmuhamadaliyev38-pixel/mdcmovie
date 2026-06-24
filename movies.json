@@ -166,18 +166,17 @@
     "video_id": "58",
     "genres": [
       "Fantastika",
-      "Sarguzasht",
-      "Action"
-    ],
-    "catalogs": [
-      "kinolar"
+      "Sarguzasht"
     ]
   },
   "40": {
     "name": "Wall street bo'risi   the wolf of wall street",
     "desc": "1080p   Uzb",
     "poster": "https://i.ibb.co/twCQ9nVm/photo.jpg",
-    "video_id": "62"
+    "video_id": "62",
+    "genres": [
+      "Drama"
+    ]
   },
   "41": {
     "name": "Ajdar Uyi 3-fasl",
