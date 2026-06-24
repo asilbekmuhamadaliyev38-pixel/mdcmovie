@@ -31,7 +31,10 @@
     "name": "O'rgimchak-odam 2: Uydan yiroqda        Spider-Man: Far from Home",
     "desc": "1080p uzb",
     "poster": "https://upload.wikimedia.org/wikipedia/uz/4/40/Spider-Man_Far_From_Home_posteri.jpeg",
-    "video_id": "10"
+    "video_id": "10",
+    "catalogs": [
+      "kinolar"
+    ]
   },
   "8": {
     "name": "O'rgimchak-odam Uyga yo'l yo'q    Spider-Man: No Way Home",
