@@ -713,16 +713,31 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(lines) < 5:
             await update.message.reply_text("❌ 5 ta qator kerak! Qayta yuboring:", reply_markup=get_cancel_keyboard())
             return
+        code = lines[2].lower()
+        if code in movies:
+            await update.message.reply_text(f"❌ '{code}' kodi allaqachon mavjud! Boshqa kod kiriting:", reply_markup=get_cancel_keyboard())
+            return
         new_movie_wizard[user_id] = {
-            "name": lines[0], "desc": lines[1], "code": lines[2].lower(),
+            "name": lines[0], "desc": lines[1], "code": code,
             "poster": lines[3], "video_id": lines[4],
             "catalogs": [], "genres": []
         }
-        admin_states[user_id] = "add_movie_catalog"
-        kb = [[InlineKeyboardButton(cat, callback_data=f"wiz_cat_{i}")] for i, cat in enumerate(catalogs)]
-        kb.append([InlineKeyboardButton("➡️ Keyingi (Janr)", callback_data="wiz_cat_done")])
-        await update.message.reply_text("🗂 Katalog tanlang (bir nechta bo'lishi mumkin):", reply_markup=InlineKeyboardMarkup(kb))
-        await update.message.reply_text("Bekor qilish:", reply_markup=get_return_main_keyboard())
+        admin_states[user_id] = None
+        preview = (
+            f"🎬 Yangi kino ma'lumotlari:\n\n"
+            f"📛 Nom: {lines[0]}\n"
+            f"📝 Tavsif: {lines[1]}\n"
+            f"🔑 Kod: {code}\n"
+            f"🖼 Poster: {lines[3]}\n"
+            f"📥 Video ID: {lines[4]}\n\n"
+            f"📂 Katalog va 🎭 janrni keyin '✏️ Kino tahrirlash' bo'limidan qo'shasiz.\n\n"
+            f"Tasdiqlaysizmi?"
+        )
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Tasdiqlash", callback_data="wiz_confirm_save"),
+             InlineKeyboardButton("❌ Bekor", callback_data="wiz_confirm_cancel")]
+        ])
+        await update.message.reply_text(preview, reply_markup=kb)
         return
 
     if state == "edit_movie_select":
@@ -1270,38 +1285,34 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=user_id, text="📝 Yangi start xabarini yuboring (Rasm, GIF yoki oddiy Matn bo'lishi mumkin):", reply_markup=get_cancel_keyboard())
         return
 
-    # KINO QO'SHISH YAKUNIY BOSQICHI (SO'ROVSIZ FULL TUGAYDI)
-    if data.startswith("wiz_cat_"):
+    # KINO QO'SHISH — TASDIQLASH
+    if data == "wiz_confirm_save":
         await query.answer()
-        val = data.replace("wiz_cat_", "")
-        if val == "done":
-            admin_states[user_id] = "add_movie_genre"
-            kb = [[InlineKeyboardButton(gen, callback_data=f"wiz_gen_{i}")] for i, gen in enumerate(genres)]
-            kb.append([InlineKeyboardButton("💾 Saqlash va Yakunlash", callback_data="wiz_gen_done")])
-            await query.message.edit_text("🎭 Janr tanlang (bir nechta bo'lishi mumkin):", reply_markup=InlineKeyboardMarkup(kb))
-        else:
-            idx = int(val)
-            if user_id in new_movie_wizard and catalogs[idx] not in new_movie_wizard[user_id]["catalogs"]:
-                new_movie_wizard[user_id]["catalogs"].append(catalogs[idx])
-                await query.answer(f"➕ Qo'shildi")
+        wiz = new_movie_wizard.pop(user_id, None)
+        if not wiz:
+            await query.message.edit_text("❌ Ma'lumot topilmadi. Qaytadan urinib ko'ring.")
+            return
+        code = wiz["code"]
+        movies[code] = {
+            "name": wiz["name"], "desc": wiz["desc"], "poster": wiz["poster"],
+            "video_id": wiz["video_id"], "catalogs": [], "genres": []
+        }
+        save_and_push("movies.json", movies, f"Yangi kino qo'shildi: {code}")
+        admin_states[user_id] = None
+        await query.message.edit_text(f"🎉 '{wiz['name']}' kinosi muvaffaqiyatli saqlandi!")
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="📂 Katalog/janr qo'shish uchun: ✏️ Kino tahrirlash → kino kodi",
+            reply_markup=get_admin_keyboard()
+        )
         return
 
-    if data.startswith("wiz_gen_"):
-        await query.answer()
-        val = data.replace("wiz_gen_", "")
-        if val == "done":
-            wiz = new_movie_wizard.pop(user_id, None)
-            if wiz:
-                code = wiz["code"]
-                movies[code] = {"name": wiz["name"], "desc": wiz["desc"], "poster": wiz["poster"], "video_id": wiz["video_id"], "catalogs": wiz["catalogs"], "genres": wiz["genres"]}
-                save_and_push("movies.json", movies, f"Yangi kino qo'shildi: {code}")
-                admin_states[user_id] = None
-                await query.message.edit_text(f"🎉 '{wiz['name']}' kinosi muvaffaqiyatli saqlandi va jarayon yakunlandi!", reply_markup=get_admin_keyboard())
-        else:
-            idx = int(val)
-            if user_id in new_movie_wizard and genres[idx] not in new_movie_wizard[user_id]["genres"]:
-                new_movie_wizard[user_id]["genres"].append(genres[idx])
-                await query.answer(f"➕ Qo'shildi")
+    if data == "wiz_confirm_cancel":
+        await query.answer("Bekor qilindi")
+        new_movie_wizard.pop(user_id, None)
+        admin_states[user_id] = None
+        await query.message.delete()
+        await context.bot.send_message(chat_id=user_id, text="❌ Kino qo'shish bekor qilindi.", reply_markup=get_admin_keyboard())
         return
 
     if data == "broadcast_confirm":
