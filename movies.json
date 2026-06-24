@@ -138,7 +138,10 @@
     "name": "Godzilla 2: Mahluqlar quroli          Godzilla: King of the Monsters",
     "desc": "1080p    Uzb",
     "poster": "https://i.ibb.co/RGytWfdj/photo.jpg",
-    "video_id": "56"
+    "video_id": "56",
+    "genres": [
+      "Action"
+    ]
   },
   "37": {
     "name": "Godzila Kongga qarshi      Godzilla vs Kong",
