@@ -40,24 +40,22 @@ genres = []
 users = set()
 active_users = set()
 deleted_users = set()
-blocked_users = set()
 admin_states = {}
 new_movie_wizard = {}
 ad_post_id = None
 views = {}          
 saved_movies = {}   
-admin_logs = []
 
-# YANGI: reyting va qism-navigatsiya uchun ma'lumotlar
 ratings = {}        # {"movie_code": {"user_id": baho}}
-part_progress = {}  # {"user_id_movie_code": current_part_index} - foydalanuvchi qaysi qismda turgani
+part_progress = {}  # {"user_id_movie_code": current_part_index}
 
-# YANGI: pending o'zgarishlar to'plami - avto-bekap navbati uchun
-_pending_saves = {}      # {filename: (data, message)}
+_pending_saves = {}      
 _pending_saves_lock = threading.Lock()
 
 bot_settings = {
     "protect_content": True,
+    "start_media_type": "text", # text, photo, animation
+    "start_file_id": None,
     "start_text": (
         "👋 Assalomu alaykum {name}, botimizga xush kelibsiz\n\n"
         "🎥 Bot orqali siz sevimli filmlar, seriallar va multfilmlarni sifatli formatda ko'rishingiz mumkin\n\n"
@@ -112,14 +110,11 @@ def save_and_push(filename, data, message):
     write_local(filename, data)
     github_put(filename, data, message)
 
-# YANGI: navbatga qo'yib saqlash - har safar emas, balki to'plab keyin push qiladi.
-# Lokal faylga DARHOL yoziladi (hech narsa yo'qolmaydi), GitHub'ga esa navbat orqali.
 def queue_save(filename, data, message):
     write_local(filename, data)
     with _pending_saves_lock:
         _pending_saves[filename] = (data, message)
 
-# YANGI: navbatdagi barcha o'zgarishlarni GitHub'ga push qiladi (avto-bekap tikleri uchun)
 def flush_pending_saves():
     with _pending_saves_lock:
         items = list(_pending_saves.items())
@@ -127,8 +122,7 @@ def flush_pending_saves():
     for filename, (data, message) in items:
         github_put(filename, data, message)
 
-# YANGI: avto-bekap - har AUTO_BACKUP_INTERVAL soniyada navbatdagilarni GitHub'ga yuboradi
-AUTO_BACKUP_INTERVAL = 60  # soniya
+AUTO_BACKUP_INTERVAL = 60  
 
 def auto_backup_loop():
     while True:
@@ -141,8 +135,8 @@ def auto_backup_loop():
 # ==================== MA'LUMOT YUKLASH ====================
 def load_data():
     global admins, movies, channels, catalogs, genres, users, active_users
-    global deleted_users, blocked_users, ad_post_id, bot_settings
-    global views, saved_movies, admin_logs, ratings, part_progress
+    global deleted_users, ad_post_id, bot_settings
+    global views, saved_movies, ratings, part_progress
 
     movies.update(read_file("movies.json", {}))
     channels.update(read_file("channels.json", {}))
@@ -150,17 +144,12 @@ def load_data():
     views.update(read_file("views.json", {}))
     saved_movies_raw = read_file("saved_movies.json", {})
     saved_movies.update({str(k): v for k, v in saved_movies_raw.items()})
-    admin_logs_raw = read_file("admin_logs.json", [])
-    admin_logs.extend(admin_logs_raw[-200:])
 
-    # YANGI: reyting va qism-progress yuklash
     ratings_raw = read_file("ratings.json", {})
     ratings.update(ratings_raw)
     part_progress_raw = read_file("part_progress.json", {})
     part_progress.update(part_progress_raw)
 
-    # MUAMMO SHU YERDA EDI: Agar Github yoki localda fayl bo'sh bo'lsa ham [] qaytardi,
-    # lekin None tekshirilgani uchun doim eski default janrlar qaytib kelaverardi.
     loaded_cats = read_file("catalogs.json", None)
     catalogs.clear()
     if loaded_cats is not None: catalogs.extend(loaded_cats)
@@ -177,17 +166,9 @@ def load_data():
     users.clear(); users.update(set(read_file("users.json", [])))
     active_users.clear(); active_users.update(set(read_file("active_users.json", list(users))))
     deleted_users.clear(); deleted_users.update(set(read_file("deleted_users.json", [])))
-    blocked_users.clear(); blocked_users.update(set(read_file("blocked_users.json", [])))
 
     ad = read_file("ad_post.json", {"id": None})
     ad_post_id = ad.get("id") if isinstance(ad, dict) else None
-
-def add_log(admin_id, action):
-    entry = {"admin": admin_id, "action": action, "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
-    admin_logs.append(entry)
-    if len(admin_logs) > 200:
-        admin_logs.pop(0)
-    save_and_push("admin_logs.json", admin_logs, "Log yangilandi")
 
 def track_user(user_id):
     global users, active_users, deleted_users
@@ -205,15 +186,12 @@ def increment_views(movie_code):
     save_and_push("views.json", views, "Ko'rishlar yangilandi")
 
 def is_admin(user_id): return user_id in admins
-def is_blocked(user_id): return user_id in blocked_users
 
-# ==================== YANGI: REYTING FUNKSIYALARI ====================
+# ==================== REYTING FUNKSIYALARI ====================
 def set_rating(movie_code, user_id, score):
     if movie_code not in ratings:
         ratings[movie_code] = {}
     ratings[movie_code][str(user_id)] = score
-    # Reyting kamdan-kam o'zgaradi (har user bir marta bosadi), shu sababli
-    # darhol GitHub'ga yuboramiz - navbatga qoldirmaymiz, restart bo'lsa ham yo'qolmasin.
     save_and_push("ratings.json", ratings, f"Reyting yangilandi: {movie_code}")
 
 def get_avg_rating(movie_code):
@@ -225,11 +203,7 @@ def get_avg_rating(movie_code):
 def get_user_rating(movie_code, user_id):
     return ratings.get(movie_code, {}).get(str(user_id))
 
-def stars_str(avg):
-    full = round(avg)
-    return "⭐" * full + "☆" * (5 - full) if avg > 0 else "Baholanmagan"
-
-# ==================== YANGI: TOP BAHOLANGANLAR SAHIFALASH ====================
+# ==================== TOP BAHOLANGANLAR SAHIFALASH ====================
 TOP_RATED_PAGE_SIZE = 10
 
 def get_sorted_top_rated():
@@ -241,16 +215,17 @@ def get_sorted_top_rated():
     scored.sort(key=lambda x: (x[1], x[2]), reverse=True)
     return scored
 
-def build_top_rated_keyboard(scored, page):
+def build_top_rated_keyboard(scored, page, prefix="toprated"):
     start = page * TOP_RATED_PAGE_SIZE
     end = start + TOP_RATED_PAGE_SIZE
     page_items = scored[start:end]
 
     kb = []
     row = []
-    for offset, (code, avg, count) in enumerate(page_items):
+    for offset, item in enumerate(page_items):
+        code = item[0] if isinstance(item, tuple) else item
         num = start + offset + 1
-        row.append(InlineKeyboardButton(str(num), callback_data=f"toprated_open_{code}"))
+        row.append(InlineKeyboardButton(str(num), callback_data=f"{prefix}_open_{code}"))
         if len(row) == 5:
             kb.append(row)
             row = []
@@ -259,9 +234,9 @@ def build_top_rated_keyboard(scored, page):
 
     nav_row = []
     if start > 0:
-        nav_row.append(InlineKeyboardButton("◀️ Oldingi sahifa", callback_data=f"toprated_page_{page-1}"))
+        nav_row.append(InlineKeyboardButton("◀️ Oldingi", callback_data=f"{prefix}_page_{page-1}"))
     if end < len(scored):
-        nav_row.append(InlineKeyboardButton("Keyingi sahifa ▶️", callback_data=f"toprated_page_{page+1}"))
+        nav_row.append(InlineKeyboardButton("Keyingi ▶️", callback_data=f"{prefix}_page_{page+1}"))
     if nav_row:
         kb.append(nav_row)
 
@@ -271,41 +246,82 @@ async def show_top_rated_page(message, bot, page, edit=False):
     scored = get_sorted_top_rated()
     if not scored:
         text = "⭐ Hali hech qanday kino baholanmagan."
-        if edit:
-            await message.edit_text(text)
-        else:
-            await bot.send_message(chat_id=message.chat_id, text=text)
+        if edit: await message.edit_text(text)
+        else: await bot.send_message(chat_id=message.chat_id, text=text)
         return
 
-    kb, page_items, start = build_top_rated_keyboard(scored, page)
+    kb, page_items, start = build_top_rated_keyboard(scored, page, "toprated")
     lines = []
     for offset, (code, avg, count) in enumerate(page_items):
         num = start + offset + 1
         d = movies[code]
         name = d.get("name", code).upper() if isinstance(d, dict) else code.upper()
-        lines.append(f"{num}. {name} — {stars_str(avg)} ({avg:.1f}/5, {count} ovoz)")
+        lines.append(f"{num}. {name} {avg:.1f}/5 ({count}ta ovoz)")
 
     total_pages = (len(scored) - 1) // TOP_RATED_PAGE_SIZE + 1
-    cur_page_num = page + 1
-    text = f"⭐ Top baholangan kinolar ({cur_page_num}/{total_pages}-sahifa):\n\n" + "\n".join(lines) + "\n\n👇 Kerakli kinoning raqamini bosing:"
+    text = f"⭐ Top baholangan kinolar ({page+1}/{total_pages}-sahifa):\n\n" + "\n".join(lines) + "\n\n👇 Kerakli kinoning raqamini bosing:"
 
-    if edit:
-        await message.edit_text(text, reply_markup=kb)
-    else:
-        await bot.send_message(chat_id=message.chat_id, text=text, reply_markup=kb)
+    if edit: await message.edit_text(text, reply_markup=kb)
+    else: await bot.send_message(chat_id=message.chat_id, text=text, reply_markup=kb)
 
-# ==================== YANGI: QISMLI KINO YORDAMCHI FUNKSIYALARI ====================
+# ==================== SAQLANGANLAR SAHIFALASH ====================
+async def show_saved_movies_page(chat_id, bot, page, edit=False, message=None):
+    uid_str = str(chat_id)
+    saved = saved_movies.get(uid_str, [])
+    valid = [c for c in saved if c in movies]
+    
+    if not valid:
+        text = "❤️ Siz hali hech qanday kino saqlamagansiz.\n\nKinoni ko'rayotganda '❤️ Saqlash' tugmasini bosing!"
+        if edit and message: await message.edit_text(text)
+        else: await bot.send_message(chat_id=chat_id, text=text)
+        return
+
+    kb, page_items, start = build_top_rated_keyboard(valid, page, "mysaved")
+    lines = []
+    for offset, code in enumerate(page_items):
+        num = start + offset + 1
+        d = movies[code]
+        name = d.get("name", code).upper() if isinstance(d, dict) else code.upper()
+        avg, count = get_avg_rating(code)
+        lines.append(f"{num}. {name} {avg:.1f}/5 ({count}ta ovoz)")
+
+    total_pages = (len(valid) - 1) // TOP_RATED_PAGE_SIZE + 1
+    text = f"❤️ Saqlangan kinolaringiz ({page+1}/{total_pages}-sahifa):\n\n" + "\n".join(lines) + "\n\n👇 Kerakli kinoning raqamini bosing:"
+    
+    if edit and message: await message.edit_text(text, reply_markup=kb)
+    else: await bot.send_message(chat_id=chat_id, text=text, reply_markup=kb)
+
+async def show_saved_movie_detail(chat_id, bot, movie_code):
+    if movie_code not in movies: return
+    d = movies[movie_code]
+    name = d.get("name", movie_code).upper() if isinstance(d, dict) else movie_code.upper()
+    desc = d.get("desc", "") if isinstance(d, dict) else ""
+    poster = d.get("poster") if isinstance(d, dict) else None
+    vc = views.get(movie_code, 0)
+    avg, count = get_avg_rating(movie_code)
+    
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("▶️ Ko'rish", callback_data=f"watch_{movie_code}"),
+         InlineKeyboardButton("🗑️ O'chirish", callback_data=f"unsave_{movie_code}")],
+        [InlineKeyboardButton("🔙 Ro'yxatga qaytish", callback_data="mysaved_page_0")]
+    ])
+    caption = f"🎬 {name}\n📝 {desc}\n👁 {vc} marta ko'rilgan\n⭐ Reyting: {avg:.1f}/5 ({count}ta ovoz)\n🔑 Kod: {movie_code}"
+    try:
+        if poster and poster.startswith("http"):
+            await bot.send_photo(chat_id=chat_id, photo=poster, caption=caption, reply_markup=kb)
+        else:
+            await bot.send_message(chat_id=chat_id, text=caption, reply_markup=kb)
+    except Exception:
+        await bot.send_message(chat_id=chat_id, text=caption, reply_markup=kb)
+
+# ==================== QISMLI KINO YORDAMCHI FUNKSIYALARI ====================
 def get_video_ids(data):
-    """movie ma'lumotidan video_id ro'yxatini qaytaradi (har doim list)."""
     video_ids_raw = data.get("video_id") if isinstance(data, dict) else data
     if isinstance(video_ids_raw, str):
         return [v.strip() for v in video_ids_raw.split(",") if v.strip()]
     elif isinstance(video_ids_raw, list):
         return video_ids_raw
     return [str(video_ids_raw)]
-
-def is_multi_part(data):
-    return len(get_video_ids(data)) > 1
 
 def get_part_progress_key(user_id, movie_code):
     return f"{user_id}_{movie_code}"
@@ -334,8 +350,8 @@ def get_admin_keyboard():
         ["🗑️ Kino o'chirish", "📋 Kinolar ro'yxati"],
         ["📈 Top kinolar", "📁 Katalog/Janr"],
         ["📊 Statistika", "📢 Reklama xabar"],
-        ["📣 Hammaga xabar", "🚫 Foydalanuvchi blok"],
-        ["📝 Admin loglar", "⚙️ Bot Sozlamalari"]
+        ["📣 Hammaga xabar", "👥 Adminlarni boshqarish"],
+        ["⚙️ Bot Sozlamalari"]
     ], resize_keyboard=True)
 
 def get_cancel_keyboard():
@@ -366,27 +382,34 @@ async def get_subscription_keyboard(bot):
     keyboard.append([InlineKeyboardButton("✅ Tekshirish", callback_data="check")])
     return InlineKeyboardMarkup(keyboard)
 
+# ==================== START XABARINI YUBORISH ====================
+async def send_welcome_message(chat_id, bot, first_name):
+    media_type = bot_settings.get("start_media_type", "text")
+    file_id = bot_settings.get("start_file_id")
+    text = bot_settings.get("start_text", "").format(name=first_name)
+    kb = get_user_inline_keyboard()
+
+    try:
+        if media_type == "photo" and file_id:
+            await bot.send_photo(chat_id=chat_id, photo=file_id, caption=text, reply_markup=kb)
+        elif media_type == "animation" and file_id:
+            await bot.send_animation(chat_id=chat_id, animation=file_id, caption=text, reply_markup=kb)
+        else:
+            await bot.send_message(chat_id=chat_id, text=text, reply_markup=kb)
+    except Exception:
+        await bot.send_message(chat_id=chat_id, text=text, reply_markup=kb)
+
 # ==================== KINO YUBORISH ====================
 async def send_movie(chat_id, movie_code, bot, notify_new=False):
     global ad_post_id, bot_settings
     if movie_code not in movies: return False
     data = movies[movie_code]
 
-    video_ids_raw = data.get("video_id") if isinstance(data, dict) else data
-    if isinstance(video_ids_raw, str):
-        video_ids = [v.strip() for v in video_ids_raw.split(",") if v.strip()]
-    elif isinstance(video_ids_raw, list):
-        video_ids = video_ids_raw
-    else:
-        video_ids = [str(video_ids_raw)]
+    video_ids = get_video_ids(data)
 
-    # YANGI: agar kino bir nechta qismdan iborat bo'lsa (video_id'da vergul bilan
-    # ajratilgan bir nechta ID bo'lsa), uni alohida qism-navigatsiyali rejimda yuboramiz.
-    # Eski xulq-atvor (bitta qism bo'lsa) butunlay o'zgarishsiz qoladi.
     if len(video_ids) > 1:
         return await send_movie_part(chat_id, movie_code, 0, bot)
 
-    name = data.get("name", movie_code) if isinstance(data, dict) else movie_code
     protect = False if is_admin(chat_id) else bot_settings.get("protect_content", True)
 
     movie_kb = InlineKeyboardMarkup([
@@ -413,8 +436,7 @@ async def send_movie(chat_id, movie_code, bot, notify_new=False):
 
     if not success: return False
 
-    if not is_admin(chat_id):
-        increment_views(movie_code)
+    if not is_admin(chat_id): increment_views(movie_code)
 
     if ad_post_id and not is_admin(chat_id):
         try:
@@ -428,9 +450,8 @@ async def send_movie(chat_id, movie_code, bot, notify_new=False):
 
     return True
 
-# ==================== YANGI: QISMLI KINO YUBORISH ====================
+# ==================== QISMLI KINO YUBORISH ====================
 def build_part_nav_keyboard(movie_code, part_index, total_parts):
-    """Qism uchun ◀️ Oldingi / Keyingi ▶️ va boshqa tugmalarni quradi."""
     nav_row = []
     if part_index > 0:
         nav_row.append(InlineKeyboardButton("◀️ Oldingi qism", callback_data=f"part_{movie_code}_{part_index-1}"))
@@ -438,8 +459,7 @@ def build_part_nav_keyboard(movie_code, part_index, total_parts):
         nav_row.append(InlineKeyboardButton("Keyingi qism ▶️", callback_data=f"part_{movie_code}_{part_index+1}"))
 
     rows = []
-    if nav_row:
-        rows.append(nav_row)
+    if nav_row: rows.append(nav_row)
     rows.append([InlineKeyboardButton(f"📋 Qismlar ({part_index+1}/{total_parts})", callback_data=f"partlist_{movie_code}")])
     rows.append([
         InlineKeyboardButton("❤️ Saqlash", callback_data=f"save_{movie_code}"),
@@ -449,7 +469,6 @@ def build_part_nav_keyboard(movie_code, part_index, total_parts):
     return InlineKeyboardMarkup(rows)
 
 def build_parts_list_keyboard(movie_code, total_parts):
-    """Barcha qismlarni raqamlab ko'rsatadigan klaviatura (3 tadan qatorga)."""
     kb = []
     row = []
     for i in range(total_parts):
@@ -457,22 +476,18 @@ def build_parts_list_keyboard(movie_code, total_parts):
         if len(row) == 5:
             kb.append(row)
             row = []
-    if row:
-        kb.append(row)
+    if row: kb.append(row)
     kb.append([InlineKeyboardButton("🔙 Orqaga", callback_data=f"part_back_{movie_code}")])
     return InlineKeyboardMarkup(kb)
 
-async def send_movie_part(chat_id, movie_code, part_index, bot, edit_message=None):
-    """Qismli kinoning faqat bitta qismini, navigatsiya tugmalari bilan yuboradi."""
+async def send_movie_part(chat_id, movie_code, part_index, bot):
     if movie_code not in movies: return False
     data = movies[movie_code]
     video_ids = get_video_ids(data)
     total_parts = len(video_ids)
 
-    if part_index < 0 or part_index >= total_parts:
-        part_index = 0
+    if part_index < 0 or part_index >= total_parts: part_index = 0
 
-    name = data.get("name", movie_code) if isinstance(data, dict) else movie_code
     protect = False if is_admin(chat_id) else bot_settings.get("protect_content", True)
     vid = video_ids[part_index]
 
@@ -486,16 +501,13 @@ async def send_movie_part(chat_id, movie_code, part_index, bot, edit_message=Non
             reply_markup=kb,
             protect_content=protect
         )
-    except Exception:
-        return False
+    except Exception: return False
 
-    # Foydalanuvchining shu kinodagi joriy qismini xotirada va faylda saqlaymiz
     progress_key = get_part_progress_key(chat_id, movie_code)
     part_progress[progress_key] = part_index
     queue_save("part_progress.json", part_progress, "Qism progressi yangilandi")
 
-    if not is_admin(chat_id) and part_index == 0:
-        increment_views(movie_code)
+    if not is_admin(chat_id) and part_index == 0: increment_views(movie_code)
 
     if ad_post_id and not is_admin(chat_id) and part_index == 0:
         try:
@@ -511,11 +523,6 @@ async def send_movie_part(chat_id, movie_code, part_index, bot, edit_message=Non
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-
-    if is_blocked(user_id):
-        await update.message.reply_text("❌ Siz botdan bloklangansiz.")
-        return
-
     track_user(user_id)
     args = context.args
 
@@ -543,8 +550,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    welcome = bot_settings.get("start_text", "").format(name=update.effective_user.first_name)
-    await update.message.reply_text(welcome, reply_markup=get_user_inline_keyboard())
+    await send_welcome_message(user_id, context.bot, update.effective_user.first_name)
 
 # ==================== INLINE QUERY ====================
 async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -585,8 +591,7 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             if not filter_value or filter_value in movie_cats: match = True
         elif filter_type == "genre":
             if not filter_value or filter_value in movie_gnrs: match = True
-        elif filter_type == "top":
-            match = True
+        elif filter_type == "top": match = True
         else:
             if not query or query in name.lower() or query in str(code).lower() or query in desc.lower(): match = True
 
@@ -605,17 +610,12 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     await update.inline_query.answer(results[:50], cache_time=0)
 
-# ==================== MATN XABARLARI ====================
+# ==================== MATN VA MEDIA XABARLARI ====================
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global ad_post_id, bot_settings, catalogs, genres, movies
+    global ad_post_id, bot_settings, catalogs, genres, movies, admins
     user_id = update.effective_user.id
-    text = update.message.text.strip()
-
-    if is_blocked(user_id):
-        await update.message.reply_text("❌ Siz botdan bloklangansiz.")
-        return
-
-    track_user(user_id)
+    
+    text = update.message.text.strip() if update.message.text else ""
 
     if text in ["❌ Bekor qilish", "🏠 Asosiy panelga qaytish"]:
         admin_states[user_id] = None
@@ -623,22 +623,50 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if is_admin(user_id):
             await update.message.reply_text("🏠 Admin paneli:", reply_markup=get_admin_keyboard())
         else:
-            welcome = bot_settings.get("start_text", "").format(name=update.effective_user.first_name)
-            await update.message.reply_text(welcome, reply_markup=get_user_inline_keyboard())
+            await send_welcome_message(user_id, context.bot, update.effective_user.first_name)
         return
 
     if not is_admin(user_id):
         if not await is_joined(context.bot, user_id):
-            await update.message.reply_text(
-                "❗ Avval kanallarga obuna bo'ling!",
-                reply_markup=await get_subscription_keyboard(context.bot)
-            )
+            await update.message.reply_text("❗ Avval kanallarga obuna bo'ling!", reply_markup=await get_subscription_keyboard(context.bot))
             return
-        if await send_movie(update.effective_chat.id, text, context.bot): return
+        if text and await send_movie(update.effective_chat.id, text, context.bot): return
         await update.message.reply_text("❌ Bunday kodli kino topilmadi.")
         return
 
     state = admin_states.get(user_id)
+
+    if state == "edit_start_text":
+        if update.message.photo:
+            bot_settings["start_media_type"] = "photo"
+            bot_settings["start_file_id"] = update.message.photo[-1].file_id
+            bot_settings["start_text"] = update.message.caption or ""
+        elif update.message.animation:
+            bot_settings["start_media_type"] = "animation"
+            bot_settings["start_file_id"] = update.message.animation.file_id
+            bot_settings["start_text"] = update.message.caption or ""
+        else:
+            bot_settings["start_media_type"] = "text"
+            bot_settings["start_file_id"] = None
+            bot_settings["start_text"] = text
+
+        save_and_push("settings.json", bot_settings, "Start xabari yangilandi")
+        admin_states[user_id] = None
+        await update.message.reply_text("✅ Yangi start xabari muvaffaqiyatli saqlandi!", reply_markup=get_admin_keyboard())
+        return
+
+    if state == "add_admin_id":
+        if not text.isdigit():
+            await update.message.reply_text("❌ Faqat raqamlardan iborat Telegram ID kiriting:", reply_markup=get_cancel_keyboard())
+            return
+        new_id = int(text)
+        admins.add(new_id)
+        save_and_push("admins.json", list(admins), "Yangi admin qo'shildi")
+        admin_states[user_id] = None
+        await update.message.reply_text(f"✅ {new_id} muvaffaqiyatli admin qilindi!", reply_markup=get_admin_keyboard())
+        return
+
+    if not text: return
 
     if state == "delete_movie_by_code":
         code = text.lower()
@@ -648,7 +676,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             views.pop(code, None)
             save_and_push("movies.json", movies, f"Kino o'chirildi: {code}")
             save_and_push("views.json", views, "Ko'rishlar yangilandi")
-            add_log(user_id, f"Kino o'chirildi: {name} ({code})")
             admin_states[user_id] = None
             await update.message.reply_text(f"✅ '{name}' kinosi o'chirildi!", reply_markup=get_admin_keyboard())
         else:
@@ -668,10 +695,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         admin_states[user_id] = "add_movie_catalog"
         kb = [[InlineKeyboardButton(cat, callback_data=f"wiz_cat_{i}")] for i, cat in enumerate(catalogs)]
         kb.append([InlineKeyboardButton("➡️ Keyingi (Janr)", callback_data="wiz_cat_done")])
-        await update.message.reply_text(
-            "🗂 Katalog tanlang (bir nechta bo'lishi mumkin):",
-            reply_markup=InlineKeyboardMarkup(kb)
-        )
+        await update.message.reply_text("🗂 Katalog tanlang (bir nechta bo'lishi mumkin):", reply_markup=InlineKeyboardMarkup(kb))
         await update.message.reply_text("Bekor qilish:", reply_markup=get_return_main_keyboard())
         return
 
@@ -682,7 +706,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         admin_states[user_id] = None
         data = movies[code]
-        
         if not isinstance(data, dict):
             movies[code] = {"name": f"Kino {code}", "desc": "", "poster": "", "video_id": data, "catalogs": [], "genres": []}
             data = movies[code]
@@ -691,39 +714,28 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cur_cats = data.get("catalogs", [])
         cur_gnrs = data.get("genres", [])
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📛 Nom", callback_data=f"edit_name_{code}"),
-             InlineKeyboardButton("📝 Ma'lumot", callback_data=f"edit_desc_{code}")],
-            [InlineKeyboardButton("🖼 Poster", callback_data=f"edit_poster_{code}"),
-             InlineKeyboardButton("📥 Video ID", callback_data=f"edit_vid_{code}")],
+            [InlineKeyboardButton("📛 Nom", callback_data=f"edit_name_{code}"), InlineKeyboardButton("📝 Ma'lumot", callback_data=f"edit_desc_{code}")],
+            [InlineKeyboardButton("🖼 Poster", callback_data=f"edit_poster_{code}"), InlineKeyboardButton("📥 Video ID", callback_data=f"edit_vid_{code}")],
             [InlineKeyboardButton("📂 Kataloglar (Boshqarish)", callback_data=f"edit_cats_{code}")],
             [InlineKeyboardButton("🎭 Janrlar (Boshqarish)", callback_data=f"edit_gnrs_{code}")],
             [InlineKeyboardButton("❌ Chiqish (Tayyor)", callback_data="cancel_edit")]
         ])
-        cats_str = ", ".join(cur_cats) if cur_cats else "Yo'q"
-        gnrs_str = ", ".join(cur_gnrs) if cur_gnrs else "Yo'q"
-        await update.message.reply_text(
-            f"✏️ '{name}' — nimani tahrirlaysiz?\n\n📂 Katalog: {cats_str}\n🎭 Janr: {gnrs_str}",
-            reply_markup=kb
-        )
+        await update.message.reply_text(f"✏️ '{name}' — nimani tahrirlaysiz?\n\n📂 Katalog: {', '.join(cur_cats) or 'Yoqu'}\n🎭 Janr: {', '.join(cur_gnrs) or 'Yoqu'}", reply_markup=kb)
         return
 
     if state and state.startswith("edit_field_"):
         parts = state.split("_", 3)
-        field = parts[2]
-        code = parts[3]
+        field, code = parts[2], parts[3]
         if code in movies:
             if not isinstance(movies[code], dict):
                 movies[code] = {"name": f"Kino {code}", "desc": "", "poster": "", "video_id": movies[code], "catalogs": [], "genres": []}
-            
             if field == "name": movies[code]["name"] = text
             elif field == "desc": movies[code]["desc"] = text
             elif field == "poster": movies[code]["poster"] = text
             elif field == "vid": movies[code]["video_id"] = text
-            
             save_and_push("movies.json", movies, f"Kino tahrirlandi: {code}")
-            add_log(user_id, f"Kino tahrirlandi: {code} ({field})")
             admin_states[user_id] = None
-            await update.message.reply_text(f"✅ Muaffaqiyatli yangilandi!", reply_markup=get_admin_keyboard())
+            await update.message.reply_text(f"✅ Muvaffaqiyatli yangilandi!", reply_markup=get_admin_keyboard())
         return
 
     if state == "add_custom_catalog":
@@ -742,13 +754,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Janr qo'shildi: {text}", reply_markup=get_admin_keyboard())
         return
 
-    if state == "edit_start_text":
-        bot_settings["start_text"] = text
-        save_and_push("settings.json", bot_settings, "Start matni yangilandi")
-        admin_states[user_id] = None
-        await update.message.reply_text("✅ Start matni yangilandi!", reply_markup=get_admin_keyboard())
-        return
-
     if state == "channel_add":
         parts = text.split(" ", 1)
         if len(parts) < 2:
@@ -763,14 +768,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state == "broadcast":
         context.user_data["broadcast_text"] = text
         admin_states[user_id] = None
-        kb = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✅ Yuborish", callback_data="broadcast_confirm"),
-            InlineKeyboardButton("❌ Bekor", callback_data="cancel_broadcast")
-        ]])
-        await update.message.reply_text(
-            f"📣 Xabar:\n\n{text}\n\n👥 {len(users)} ta foydalanuvchiga yuboriladi. Tasdiqlaysizmi?",
-            reply_markup=kb
-        )
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Yuborish", callback_data="broadcast_confirm"), InlineKeyboardButton("❌ Bekor", callback_data="cancel_broadcast")]])
+        await update.message.reply_text(f"📣 Xabar:\n\n{text}\n\n👥 {len(users)} ta foydalanuvchiga yuboriladi. Tasdiqlaysizmi?", reply_markup=kb)
         return
 
     if state == "set_ad":
@@ -784,46 +783,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(msg, reply_markup=get_admin_keyboard())
         return
 
-    if state == "block_user":
-        if not text.isdigit():
-            await update.message.reply_text("❌ Faqat Telegram ID raqamini kiriting:", reply_markup=get_cancel_keyboard())
-            return
-        uid = int(text)
-        if uid == ADMIN_ID:
-            await update.message.reply_text("❌ Asosiy adminni bloklash mumkin emas!", reply_markup=get_cancel_keyboard())
-            return
-        blocked_users.add(uid)
-        save_and_push("blocked_users.json", list(blocked_users), "Foydalanuvchi bloklandi")
-        add_log(user_id, f"Foydalanuvchi bloklandi: {uid}")
-        admin_states[user_id] = None
-        await update.message.reply_text(f"✅ {uid} bloklandi!", reply_markup=get_admin_keyboard())
-        return
-
-    if state == "unblock_user":
-        if not text.isdigit():
-            await update.message.reply_text("❌ Faqat Telegram ID raqamini kiriting:", reply_markup=get_cancel_keyboard())
-            return
-        uid = int(text)
-        blocked_users.discard(uid)
-        save_and_push("blocked_users.json", list(blocked_users), "Foydalanuvchi blokdan chiqarildi")
-        add_log(user_id, f"Foydalanuvchi blokdan chiqarildi: {uid}")
-        admin_states[user_id] = None
-        await update.message.reply_text(f"✅ {uid} blokdan chiqarildi!", reply_markup=get_admin_keyboard())
-        return
-
-    # ADMIN TUGMALARI
+    # ADMIN TUGMALARI DIAGNOSTIKASI
     if text == "➕ Kino qo'shish":
         admin_states[user_id] = "add_movie_text"
-        await update.message.reply_text(
-            "➕ 5 qatorli shablonni to'ldirib yuboring:\n\n"
-            "Kino nomi\n"
-            "Tavsif\n"
-            "kod\n"
-            "https://poster.jpg\n"
-            "PostID\n\n"
-            "Misol:\nAvengers\nMarvel filmi, 4K\navengers\nhttps://example.com/p.jpg\n12345",
-            reply_markup=get_cancel_keyboard()
-        )
+        await update.message.reply_text("➕ 5 qatorli shablonni to'ldirib yuboring:\n\nKino nomi\nTavsif\nkod\nhttps://poster.jpg\nPostID", reply_markup=get_cancel_keyboard())
         return
 
     if text == "✏️ Kino tahrirlash":
@@ -841,189 +804,115 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Hali hech kim kino ko'rmagan.")
             return
         sorted_views = sorted(views.items(), key=lambda x: x[1], reverse=True)[:10]
-        lines = []
-        for i, (code, count) in enumerate(sorted_views, 1):
-            name = movies[code].get("name", code).upper() if code in movies and isinstance(movies[code], dict) else code
-            lines.append(f"{i}. {name} — 👁 {count}")
+        lines = [f"{i}. {movies[code].get('name', code).upper() if code in movies and isinstance(movies[code], dict) else code} — 👁 {count}" for i, (code, count) in enumerate(sorted_views, 1)]
         await update.message.reply_text("📈 Top 10 kino:\n\n" + "\n".join(lines))
         return
 
     if text == "📁 Katalog/Janr":
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("➕ Katalog qo'shish", callback_data="add_cat"),
-             InlineKeyboardButton("➕ Janr qo'shish", callback_data="add_gen")],
-            [InlineKeyboardButton("🗑️ Katalog o'chirish", callback_data="list_del_cat"),
-             InlineKeyboardButton("🗑️ Janr o'chirish", callback_data="list_del_gen")]
-        ])
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("➕ Katalog qo'shish", callback_data="add_cat"), InlineKeyboardButton("➕ Janr qo'shish", callback_data="add_gen")], [InlineKeyboardButton("🗑️ Katalog o'chirish", callback_data="list_del_cat"), InlineKeyboardButton("🗑️ Janr o'chirish", callback_data="list_del_gen")]])
         await update.message.reply_text("📁 Katalog va Janr sozalamalari:", reply_markup=kb)
         await update.message.reply_text("Qaytish:", reply_markup=get_return_main_keyboard())
         return
 
     if text == "📊 Statistika":
-        # Eng ko'p ko'rilgan kino
         most_viewed = "Yo'q"
         if views:
             top_code = max(views, key=views.get)
-            top_name = movies.get(top_code, {}).get("name", top_code) if isinstance(movies.get(top_code), dict) else top_code
-            most_viewed = f"{top_name} ({views[top_code]} marta)"
+            most_viewed = f"{movies.get(top_code, {}).get('name', top_code) if isinstance(movies.get(top_code), dict) else top_code} ({views[top_code]} marta)"
 
-        # Eng ko'p saqlangan kino
-        save_counts = {}
-        for uid_str, codes in saved_movies.items():
-            for c in codes:
-                save_counts[c] = save_counts.get(c, 0) + 1
-        most_saved = "Yo'q"
-        if save_counts:
-            top_save_code = max(save_counts, key=save_counts.get)
-            top_save_name = movies.get(top_save_code, {}).get("name", top_save_code) if isinstance(movies.get(top_save_code), dict) else top_save_code
-            most_saved = f"{top_save_name} ({save_counts[top_save_code]} marta)"
-
-        # Eng yuqori reytingli kino
         best_rated = "Yo'q"
-        best_avg, best_count = 0, 0
-        best_code = None
+        best_avg, best_code = 0, None
         for code in movies:
             avg, count = get_avg_rating(code)
-            if count > 0 and avg > best_avg:
-                best_avg, best_count, best_code = avg, count, code
-        if best_code:
-            bname = movies.get(best_code, {}).get("name", best_code) if isinstance(movies.get(best_code), dict) else best_code
-            best_rated = f"{bname} ({best_avg:.1f}⭐, {best_count} ovoz)"
+            if count > 0 and avg > best_avg: best_avg, best_code = avg, code
+        if best_code: best_rated = f"{movies.get(best_code, {}).get('name', best_code) if isinstance(movies.get(best_code), dict) else best_code} ({best_avg:.1f}⭐)"
 
-        # Bugun qo'shilgan ro'yxat (oxirgi loglardan)
-        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-        today_actions = len([l for l in admin_logs if l.get("time", "").startswith(today_str)])
+        await update.message.reply_text(f"📊 Statistika:\n\n👥 Jami foydalanuvchi: {len(users)}\n✅ Faol: {len(active_users)}\n❌ Bloklagan: {len(deleted_users)}\n🎬 Jami kinolar: {len(movies)}\n👁 Jami ko'rishlar: {sum(views.values())}\n\n🔥 Eng ko'p ko'rilgan: {most_viewed}\n⭐ Eng yuqori baholangan: {best_rated}")
+        return
 
-        await update.message.reply_text(
-            f"📊 Statistika:\n\n"
-            f"👥 Jami foydalanuvchi: {len(users)}\n"
-            f"✅ Faol: {len(active_users)}\n"
-            f"❌ Bloklagan (botni o'chirgan): {len(deleted_users)}\n"
-            f"🚫 Botda bloklangan: {len(blocked_users)}\n"
-            f"🎬 Jami kinolar: {len(movies)}\n"
-            f"👁 Jami ko'rishlar: {sum(views.values())}\n\n"
-            f"🔥 Eng ko'p ko'rilgan: {most_viewed}\n"
-            f"❤️ Eng ko'p saqlangan: {most_saved}\n"
-            f"⭐ Eng yuqori baholangan: {best_rated}\n\n"
-            f"📝 Bugungi admin amallari: {today_actions}"
-        )
+    if text == "👥 Adminlarni boshqarish":
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("➕ Admin qo'shish", callback_data="add_admin"), InlineKeyboardButton("🗑️ Admin o'chirish", callback_data="list_del_admin")]])
+        await update.message.reply_text(f"👥 Jami adminlar soni: {len(admins)} ta\n\nKerakli amalni tanlang:", reply_markup=kb)
         return
 
     if text == "📣 Hammaga xabar":
         admin_states[user_id] = "broadcast"
-        await update.message.reply_text(
-            f"📣 Xabar yozing ({len(users)} ta foydalanuvchi):",
-            reply_markup=get_cancel_keyboard()
-        )
+        await update.message.reply_text(f"📣 Xabar yozing ({len(users)} ta foydalanuvchi):", reply_markup=get_cancel_keyboard())
         return
 
     if text == "📢 Reklama xabar":
-        cur = f"Hozirgi: Post ID {ad_post_id}" if ad_post_id else "Hozircha yo'q"
         admin_states[user_id] = "set_ad"
-        await update.message.reply_text(
-            f"📢 Reklama: {cur}\n\nPost ID yuboring (o'chirish: 0):",
-            reply_markup=get_cancel_keyboard()
-        )
-        return
-
-    if text == "🚫 Foydalanuvchi blok":
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🚫 Bloklash", callback_data="block_u"),
-             InlineKeyboardButton("✅ Blokdan chiqarish", callback_data="unblock_u")]
-        ])
-        bl_list = "\n".join([str(u) for u in list(blocked_users)[:10]]) or "Yo'q"
-        await update.message.reply_text(
-            f"🚫 Bloklangan foydalanuvchilar ({len(blocked_users)} ta):\n{bl_list}",
-            reply_markup=kb
-        )
+        await update.message.reply_text(f"📢 Reklama Post ID yuboring (o'chirish: 0):", reply_markup=get_cancel_keyboard())
         return
 
     if text == "📋 Kinolar ro'yxati":
         if not movies:
             await update.message.reply_text("🎬 Bazada hech qanday kino yo'q.")
             return
-        lines_list = []
-        for code, d in movies.items():
-            name = d.get("name", code).upper() if isinstance(d, dict) else code.upper()
-            vc = views.get(code, 0)
-            lines_list.append(f"🔑 {code} — {name} 👁{vc}")
-        msg = f"🎬 Kinolar ro'yxati ({len(movies)} ta):\n\n" + "\n".join(lines_list[:50])
-        await update.message.reply_text(msg)
-        return
-
-    if text == "📝 Admin loglar":
-        if not admin_logs:
-            await update.message.reply_text("Loglar yo'q.")
-            return
-        last = admin_logs[-20:][::-1]
-        lines = [f"🕐 {l['time']}\n👤 {l['admin']}: {l['action']}" for l in last]
-        await update.message.reply_text("📝 Oxirgi 20 ta amal:\n\n" + "\n\n".join(lines))
+        lines_list = [f"🔑 {code} — {d.get('name', code).upper() if isinstance(d, dict) else code.upper()} 👁{views.get(code, 0)}" for code, d in movies.items()]
+        await update.message.reply_text(f"🎬 Kinolar ro'yxati ({len(movies)} ta):\n\n" + "\n".join(lines_list[:50]))
         return
 
     if text == "⚙️ Bot Sozlamalari":
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📝 Start matnini o'zgartirish", callback_data="edit_start")],
-            [InlineKeyboardButton("📢 Majburiy kanallar", callback_data="manage_ch")]
-        ])
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("📝 Start xabarini o'zgartirish", callback_data="edit_start")], [InlineKeyboardButton("📢 Majburiy kanallar", callback_data="manage_ch")]])
         await update.message.reply_text("⚙️ Bot sozalamalari:", reply_markup=kb)
         await update.message.reply_text("Qaytish:", reply_markup=get_return_main_keyboard())
         return
 
-    await update.message.reply_text(
-        "⚠️ Siz adminsiz! Botni tekshirish uchun boshqa akkountdan foydalaning.",
-        reply_markup=get_admin_keyboard()
-    )
+    await update.message.reply_text("⚠️ Noma'lum buyruq.", reply_markup=get_admin_keyboard())
 
 # ==================== CALLBACKS ====================
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global movies, channels, catalogs, genres, users, active_users, deleted_users, bot_settings, saved_movies, ratings
+    global movies, channels, catalogs, genres, users, bot_settings, saved_movies, ratings, admins
     query = update.callback_query
     user_id = query.from_user.id
     data = query.data
 
-    # ==================== YANGI: TASODIFIY KINO ====================
     if data == "random_movie":
         await query.answer()
         if not movies:
             await context.bot.send_message(chat_id=user_id, text="🎬 Hozircha bazada kino yo'q.")
             return
         import random
-        movie_code = random.choice(list(movies.keys()))
-        await send_movie(user_id, movie_code, context.bot)
+        await send_movie(user_id, random.choice(list(movies.keys())), context.bot)
         return
 
-    # ==================== YANGI: TOP BAHOLANGAN KINOLAR (sahifalash bilan) ====================
     if data == "top_rated" or data.startswith("toprated_page_"):
         await query.answer()
-        page = 0
-        if data.startswith("toprated_page_"):
-            page = int(data.replace("toprated_page_", ""))
+        page = int(data.replace("toprated_page_", "")) if data.startswith("toprated_page_") else 0
         await show_top_rated_page(query.message, context.bot, page, edit=data.startswith("toprated_page_"))
         return
 
-    if data.startswith("toprated_open_"):
+    if data.startswith("toprated_open_") or data.startswith("mysaved_open_"):
         await query.answer()
-        movie_code = data.replace("toprated_open_", "")
-        await send_movie(user_id, movie_code, context.bot)
+        code = data.replace("toprated_open_", "").replace("mysaved_open_", "")
+        if data.startswith("mysaved_open_"):
+            await show_saved_movie_detail(user_id, context.bot, code)
+        else:
+            await send_movie(user_id, code, context.bot)
         return
 
-    # ==================== YANGI: BAHOLASH MENYUSI ====================
+    if data == "my_saved" or data.startswith("mysaved_page_"):
+        await query.answer()
+        page = int(data.replace("mysaved_page_", "")) if data.startswith("mysaved_page_") else 0
+        await show_saved_movies_page(user_id, context.bot, page, edit=data.startswith("mysaved_page_"), message=query.message)
+        return
+
+    # BAHOLASH TUGMALARI (YONMA-YON 5 TASI YULDUZCHA)
     if data.startswith("rate_menu_"):
         await query.answer()
         movie_code = data.replace("rate_menu_", "")
         avg, count = get_avg_rating(movie_code)
-        user_score = get_user_rating(movie_code, user_id)
-        kb_rows = []
+        
+        kb_row = []
         for i in range(1, 6):
-            mark = "✅ " if user_score == i else ""
-            label = f"{mark}{i} {'⭐' * i}"
-            kb_rows.append([InlineKeyboardButton(label, callback_data=f"rate_{movie_code}_{i}")])
-        kb = InlineKeyboardMarkup(kb_rows)
-        info = f"{stars_str(avg)} ({avg:.1f}/5, {count} ovoz)" if count else "Hali baholanmagan"
+            kb_row.append(InlineKeyboardButton("⭐" * i if i==1 else str(i)+"⭐", callback_data=f"rate_{movie_code}_{i}"))
+        
+        info = f"{avg:.1f}/5 ({count}ta ovoz)" if count else "Baholanmagan"
         await context.bot.send_message(
             chat_id=user_id,
-            text=f"⭐ Ushbu kinoga baho bering:\n\nHozirgi reyting: {info}",
-            reply_markup=kb
+            text=f"⭐ Ushbu kinoga baho bering:\nHozirgi o'rtacha reyting: {info}",
+            reply_markup=InlineKeyboardMarkup([kb_row])
         )
         return
 
@@ -1031,103 +920,49 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
         rest = data[len("rate_"):]
         movie_code, _, score_str = rest.rpartition("_")
-        score = int(score_str)
-        set_rating(movie_code, user_id, score)
-        avg, count = get_avg_rating(movie_code)
-        await query.answer(f"✅ Siz {score} ⭐ baho berdingiz! O'rtacha: {avg:.1f}/5", show_alert=True)
+        set_rating(movie_code, user_id, int(score_str))
+        avg, _ = get_avg_rating(movie_code)
+        await query.answer(f"✅ Baholandi! Yangi o'rtacha: {avg:.1f}/5", show_alert=True)
         return
 
-    # ==================== YANGI: QISMLI KINO NAVIGATSIYASI ====================
     if data.startswith("part_") and not data.startswith("part_back_") and not data.startswith("partlist_"):
         await query.answer()
-        # rsplit ishlatamiz, chunki kino kodining o'zida "_" bo'lishi mumkin
         rest = data[len("part_"):]
         movie_code, _, idx_str = rest.rpartition("_")
-        part_index = int(idx_str)
-        await send_movie_part(user_id, movie_code, part_index, context.bot)
+        await send_movie_part(user_id, movie_code, int(idx_str), context.bot)
         return
 
     if data.startswith("partlist_"):
         await query.answer()
         movie_code = data.replace("partlist_", "")
         if movie_code in movies:
-            total_parts = len(get_video_ids(movies[movie_code]))
-            kb = build_parts_list_keyboard(movie_code, total_parts)
-            try:
-                await query.message.edit_reply_markup(reply_markup=kb)
-            except Exception:
-                pass
+            await query.message.edit_reply_markup(reply_markup=build_parts_list_keyboard(movie_code, len(get_video_ids(movies[movie_code]))))
         return
 
     if data.startswith("part_back_"):
         await query.answer()
         movie_code = data.replace("part_back_", "")
-        progress_key = get_part_progress_key(user_id, movie_code)
-        current = part_progress.get(progress_key, 0)
         if movie_code in movies:
-            total_parts = len(get_video_ids(movies[movie_code]))
-            kb = build_part_nav_keyboard(movie_code, current, total_parts)
-            try:
-                await query.message.edit_reply_markup(reply_markup=kb)
-            except Exception:
-                pass
+            await query.message.edit_reply_markup(reply_markup=build_part_nav_keyboard(movie_code, part_progress.get(get_part_progress_key(user_id, movie_code), 0), len(get_video_ids(movies[movie_code]))))
         return
 
     if data == "check":
         if await is_joined(context.bot, user_id):
             await query.answer("✅ Obuna tasdiqlandi!")
             await query.message.delete()
-            welcome = bot_settings.get("start_text", "").format(name=query.from_user.first_name)
-            await context.bot.send_message(chat_id=user_id, text=welcome, reply_markup=get_user_inline_keyboard())
+            await send_welcome_message(user_id, context.bot, query.from_user.first_name)
         else:
             await query.answer("❌ Kanallarga hali a'zo bo'lmadingiz!", show_alert=True)
         return
 
     if data == "go_to_main_menu":
         await query.answer()
-        welcome = bot_settings.get("start_text", "").format(name=query.from_user.first_name)
-        await context.bot.send_message(chat_id=user_id, text=welcome, reply_markup=get_user_inline_keyboard())
-        return
-
-    if data == "my_saved":
-        await query.answer()
-        uid_str = str(user_id)
-        saved = saved_movies.get(uid_str, [])
-        valid = [c for c in saved if c in movies]
-        if not valid:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text="❤️ Siz hali hech qanday kino saqlamagansiz.\n\nKinoni ko'rayotganda '❤️ Saqlash' tugmasini bosing!"
-            )
-            return
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=f"❤️ Saqlangan kinolaringiz ({len(valid)} ta):\n\nQuyidagi tugmalardan birini bosing:"
-        )
-        for code in valid:
-            d = movies[code]
-            name = d.get("name", code).upper() if isinstance(d, dict) else code.upper()
-            desc = d.get("desc", "") if isinstance(d, dict) else ""
-            poster = d.get("poster") if isinstance(d, dict) else None
-            vc = views.get(code, 0)
-            kb = InlineKeyboardMarkup([[
-                InlineKeyboardButton("▶️ Ko'rish", callback_data=f"watch_{code}"),
-                InlineKeyboardButton("🗑️ O'chirish", callback_data=f"unsave_{code}")
-            ]])
-            caption = f"🎬 {name}\n📝 {desc}\n👁 {vc} marta ko'rilgan\n🔑 Kod: {code}"
-            try:
-                if poster and poster.startswith("http"):
-                    await context.bot.send_photo(chat_id=user_id, photo=poster, caption=caption, reply_markup=kb)
-                else:
-                    await context.bot.send_message(chat_id=user_id, text=caption, reply_markup=kb)
-            except Exception:
-                await context.bot.send_message(chat_id=user_id, text=caption, reply_markup=kb)
+        await send_welcome_message(user_id, context.bot, query.from_user.first_name)
         return
 
     if data.startswith("watch_"):
         await query.answer()
-        movie_code = data.split("_")[1]
-        await send_movie(user_id, movie_code, context.bot)
+        await send_movie(user_id, data.split("_")[1], context.bot)
         return
 
     if data.startswith("unsave_"):
@@ -1136,31 +971,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if uid_str in saved_movies and movie_code in saved_movies[uid_str]:
             saved_movies[uid_str].remove(movie_code)
             save_and_push("saved_movies.json", saved_movies, "Saqlanganlardan o'chirildi")
-        await query.answer("🗑️ Saqlanganlardan o'chirildi!", show_alert=True)
+        await query.answer("🗑️ O'chirildi!", show_alert=True)
         await query.message.delete()
+        await show_saved_movies_page(user_id, context.bot, 0)
         return
 
     if data.startswith("save_"):
         movie_code = data.split("_")[1]
         uid_str = str(user_id)
-        if uid_str not in saved_movies:
-            saved_movies[uid_str] = []
+        if uid_str not in saved_movies: saved_movies[uid_str] = []
         if movie_code not in saved_movies[uid_str]:
             saved_movies[uid_str].append(movie_code)
             save_and_push("saved_movies.json", saved_movies, "Kino saqlandi")
             await query.answer("❤️ Saqlandi!", show_alert=True)
         else:
-            await query.answer("✨ Bu kino allaqachon saqlangan!", show_alert=True)
+            await query.answer("✨ Allaqachon saqlangan!", show_alert=True)
         return
 
-    # O'G'IL BOLLAR UCHUN KATALOG VA JANRNI 2 QATOR (YONMA-YON) QILISH
     if data == "user_show_catalogs":
         await query.answer()
         kb = []
         for i in range(0, len(catalogs), 2):
             row = [InlineKeyboardButton(catalogs[i], switch_inline_query_current_chat=f"katalog:{catalogs[i]}")]
-            if i + 1 < len(catalogs):
-                row.append(InlineKeyboardButton(catalogs[i+1], switch_inline_query_current_chat=f"katalog:{catalogs[i+1]}"))
+            if i + 1 < len(catalogs): row.append(InlineKeyboardButton(catalogs[i+1], switch_inline_query_current_chat=f"katalog:{catalogs[i+1]}"))
             kb.append(row)
         kb.append([InlineKeyboardButton("⬅️ Orqaga", callback_data="go_to_main_menu")])
         await query.message.edit_text("📂 Kerakli katalogni tanlang:", reply_markup=InlineKeyboardMarkup(kb))
@@ -1171,8 +1004,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = []
         for i in range(0, len(genres), 2):
             row = [InlineKeyboardButton(genres[i], switch_inline_query_current_chat=f"janr:{genres[i]}")]
-            if i + 1 < len(genres):
-                row.append(InlineKeyboardButton(genres[i+1], switch_inline_query_current_chat=f"janr:{genres[i+1]}"))
+            if i + 1 < len(genres): row.append(InlineKeyboardButton(genres[i+1], switch_inline_query_current_chat=f"janr:{genres[i+1]}"))
             kb.append(row)
         kb.append([InlineKeyboardButton("⬅️ Orqaga", callback_data="go_to_main_menu")])
         await query.message.edit_text("🎭 Kerakli janrni tanlang:", reply_markup=InlineKeyboardMarkup(kb))
@@ -1180,96 +1012,111 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not is_admin(user_id): return
 
-    # TAHRIRLASH INLINE HANDLING
+    # ADMIN PANEL ISHLARI
+    if data == "add_admin":
+        await query.answer()
+        admin_states[user_id] = "add_admin_id"
+        await context.bot.send_message(chat_id=user_id, text="➕ Yangi adminning Telegram ID raqamini kiriting:", reply_markup=get_cancel_keyboard())
+        return
+
+    if data == "list_del_admin":
+        await query.answer()
+        kb = [[InlineKeyboardButton(f"🗑️ {adm_id}", callback_data=f"del_admin_{adm_id}")] for adm_id in admins if adm_id != ADMIN_ID]
+        if not kb:
+            await context.bot.send_message(chat_id=user_id, text="Boshqa adminlar mavjud emas.")
+            return
+        await query.message.edit_text("🗑️ O'chirmoqchi bo'lgan adminni tanlang:", reply_markup=InlineKeyboardMarkup(kb))
+        return
+
+    if data.startswith("del_admin_"):
+        await query.answer()
+        adm_id = int(data.replace("del_admin_", ""))
+        admins.discard(adm_id)
+        save_and_push("admins.json", list(admins), "Admin o'chirildi")
+        await context.bot.send_message(chat_id=user_id, text=f"✅ {adm_id} adminlikdan olindi!", reply_markup=get_admin_keyboard())
+        return
+
+    # MAJBURIY KANALLAR TUZATILDI (CHIROYLI REJIM VA TASDIQLASH BILAN)
+    if data == "manage_ch":
+        await query.answer()
+        kb = [[InlineKeyboardButton(f"📢 {name}", callback_data=f"view_ch_{ch_id}")] for ch_id, name in channels.items()]
+        kb.append([InlineKeyboardButton("➕ Kanal qo'shish", callback_data="add_ch_start")])
+        await query.message.edit_text("📢 Majburiy obuna kanallari ro'yxati (Boshqarish uchun kanal ustiga bosing):", reply_markup=InlineKeyboardMarkup(kb))
+        return
+
+    if data.startswith("view_ch_"):
+        await query.answer()
+        ch_id = data.replace("view_ch_", "")
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Kanalni o'chirish", callback_data=f"del_ch_{ch_id}")], [InlineKeyboardButton("🔙 Orqaga", callback_data="manage_ch")]])
+        await query.message.edit_text(f"Kanal: {channels.get(ch_id, ch_id)}\nID/Username: {ch_id}\n\nUshbu kanalni o'chirib tashlaysizmi?", reply_markup=kb)
+        return
+
+    if data.startswith("del_ch_"):
+        await query.answer()
+        ch_id = data.replace("del_ch_", "")
+        if ch_id in channels:
+            removed = channels.pop(ch_id)
+            save_and_push("channels.json", channels, f"Kanal o'chirildi: {removed}")
+            await context.bot.send_message(chat_id=user_id, text=f"✅ Kanal olib tashlandi: {removed}", reply_markup=get_admin_keyboard())
+        return
+
+    if data == "add_ch_start":
+        await query.answer()
+        admin_states[user_id] = "channel_add"
+        await context.bot.send_message(chat_id=user_id, text="📢 Kanalni formatda yuboring:\n`@username Kanal nomi`", reply_markup=get_cancel_keyboard())
+        return
+
     if data.startswith("edit_name_") or data.startswith("edit_desc_") or data.startswith("edit_poster_") or data.startswith("edit_vid_"):
         await query.answer()
         parts = data.split("_", 2)
-        field = parts[1]
-        code = parts[2]
-        admin_states[user_id] = f"edit_field_{field}_{code}"
-        await context.bot.send_message(chat_id=user_id, text=f"📝 Yangi qiymatni kiriting:", reply_markup=get_cancel_keyboard())
+        admin_states[user_id] = f"edit_field_{parts[1]}_{parts[2]}"
+        await context.bot.send_message(chat_id=user_id, text="📝 Yangi qiymatni kiriting:", reply_markup=get_cancel_keyboard())
         return
 
-    # KINO KATALOGLARINI TAHRIRLASH (PTICHKA BILAN)
     if data.startswith("edit_cats_"):
         await query.answer()
         code = data.split("_")[2]
-        if code in movies and not isinstance(movies[code], dict):
-            movies[code] = {"name": f"Kino {code}", "desc": "", "poster": "", "video_id": movies[code], "catalogs": [], "genres": []}
-        
         movie_cats = movies[code].get("catalogs", []) if code in movies else []
-        
-        kb = []
-        for i, cat in enumerate(catalogs):
-            status = "✅ " if cat in movie_cats else ""
-            kb.append([InlineKeyboardButton(f"{status}{cat}", callback_data=f"tgl_cat_{code}_{i}")])
+        kb = [[InlineKeyboardButton(f"{'✅ ' if cat in movie_cats else ''}{cat}", callback_data=f"tgl_cat_{code}_{i}")] for i, cat in enumerate(catalogs)]
         kb.append([InlineKeyboardButton("🔙 Orqaga", callback_data=f"edit_back_{code}")])
-        await query.message.edit_text("📂 Kataloglarni boshqarish (Qo'shish/O'chirish uchun bosing):", reply_markup=InlineKeyboardMarkup(kb))
+        await query.message.edit_text("📂 Kataloglarni boshqarish:", reply_markup=InlineKeyboardMarkup(kb))
         return
 
     if data.startswith("tgl_cat_"):
         parts = data.split("_")
-        code = parts[2]
-        idx = int(parts[3])
+        code, idx = parts[2], int(parts[3])
         cat_name = catalogs[idx]
         if code in movies:
             if "catalogs" not in movies[code]: movies[code]["catalogs"] = []
-            if cat_name in movies[code]["catalogs"]:
-                movies[code]["catalogs"].remove(cat_name)
-                await query.answer(f"❌ {cat_name} olib tashlandi")
-            else:
-                movies[code]["catalogs"].append(cat_name)
-                await query.answer(f"✅ {cat_name} biriktirildi")
-            save_and_push("movies.json", movies, f"Katalog tahrirlandi: {code}")
-            
-            # Inline tugmalarni srazi yangilash
+            if cat_name in movies[code]["catalogs"]: movies[code]["catalogs"].remove(cat_name)
+            else: movies[code]["catalogs"].append(cat_name)
+            save_and_push("movies.json", movies, f"Katalog tahrirlandi")
             movie_cats = movies[code].get("catalogs", [])
-            kb = []
-            for i, cat in enumerate(catalogs):
-                status = "✅ " if cat in movie_cats else ""
-                kb.append([InlineKeyboardButton(f"{status}{cat}", callback_data=f"tgl_cat_{code}_{i}")])
+            kb = [[InlineKeyboardButton(f"{'✅ ' if cat in movie_cats else ''}{cat}", callback_data=f"tgl_cat_{code}_{i}")] for i, cat in enumerate(catalogs)]
             kb.append([InlineKeyboardButton("🔙 Orqaga", callback_data=f"edit_back_{code}")])
             await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # KINO JANRLARINI TAHRIRLASH (PTICHKA BILAN)
     if data.startswith("edit_gnrs_"):
         await query.answer()
         code = data.split("_")[2]
-        if code in movies and not isinstance(movies[code], dict):
-            movies[code] = {"name": f"Kino {code}", "desc": "", "poster": "", "video_id": movies[code], "catalogs": [], "genres": []}
-            
         movie_gnrs = movies[code].get("genres", []) if code in movies else []
-        
-        kb = []
-        for i, gen in enumerate(genres):
-            status = "✅ " if gen in movie_gnrs else ""
-            kb.append([InlineKeyboardButton(f"{status}{gen}", callback_data=f"tgl_gen_{code}_{i}")])
+        kb = [[InlineKeyboardButton(f"{'✅ ' if gen in movie_gnrs else ''}{gen}", callback_data=f"tgl_gen_{code}_{i}")] for i, gen in enumerate(genres)]
         kb.append([InlineKeyboardButton("🔙 Orqaga", callback_data=f"edit_back_{code}")])
-        await query.message.edit_text("🎭 Janrlarni boshqarish (Qo'shish/O'chirish uchun bosing):", reply_markup=InlineKeyboardMarkup(kb))
+        await query.message.edit_text("🎭 Janrlarni boshqarish:", reply_markup=InlineKeyboardMarkup(kb))
         return
 
     if data.startswith("tgl_gen_"):
         parts = data.split("_")
-        code = parts[2]
-        idx = int(parts[3])
+        code, idx = parts[2], int(parts[3])
         gen_name = genres[idx]
         if code in movies:
             if "genres" not in movies[code]: movies[code]["genres"] = []
-            if gen_name in movies[code]["genres"]:
-                movies[code]["genres"].remove(gen_name)
-                await query.answer(f"❌ {gen_name} olib tashlandi")
-            else:
-                movies[code]["genres"].append(gen_name)
-                await query.answer(f"✅ {gen_name} biriktirildi")
-            save_and_push("movies.json", movies, f"Janr tahrirlandi: {code}")
-            
-            # Inline tugmalarni srazi yangilash
+            if gen_name in movies[code]["genres"]: movies[code]["genres"].remove(gen_name)
+            else: movies[code]["genres"].append(gen_name)
+            save_and_push("movies.json", movies, f"Janr tahrirlandi")
             movie_gnrs = movies[code].get("genres", [])
-            kb = []
-            for i, gen in enumerate(genres):
-                status = "✅ " if gen in movie_gnrs else ""
-                kb.append([InlineKeyboardButton(f"{status}{gen}", callback_data=f"tgl_gen_{code}_{i}")])
+            kb = [[InlineKeyboardButton(f"{'✅ ' if gen in movie_gnrs else ''}{gen}", callback_data=f"tgl_gen_{code}_{i}")] for i, gen in enumerate(genres)]
             kb.append([InlineKeyboardButton("🔙 Orqaga", callback_data=f"edit_back_{code}")])
             await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(kb))
         return
@@ -1277,30 +1124,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("edit_back_"):
         await query.answer()
         code = data.split("_")[2]
-        data_m = movies[code]
-        name = data_m.get("name", code)
-        cur_cats = data_m.get("catalogs", [])
-        cur_gnrs = data_m.get("genres", [])
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📛 Nom", callback_data=f"edit_name_{code}"),
-             InlineKeyboardButton("📝 Ma'lumot", callback_data=f"edit_desc_{code}")],
-            [InlineKeyboardButton("🖼 Poster", callback_data=f"edit_poster_{code}"),
-             InlineKeyboardButton("📥 Video ID", callback_data=f"edit_vid_{code}")],
-            [InlineKeyboardButton("📂 Kataloglar (Boshqarish)", callback_data=f"edit_cats_{code}")],
-            [InlineKeyboardButton("🎭 Janrlar (Boshqarish)", callback_data=f"edit_gnrs_{code}")],
-            [InlineKeyboardButton("❌ Chiqish (Tayyor)", callback_data="cancel_edit")]
-        ])
-        cats_str = ", ".join(cur_cats) if cur_cats else "Yo'q"
-        gnrs_str = ", ".join(cur_gnrs) if cur_gnrs else "Yo'q"
-        await query.message.edit_text(
-            f"✏️ '{name}' — nimani tahrirlaysiz?\n\n📂 Katalog: {cats_str}\n🎭 Janr: {gnrs_str}",
-            reply_markup=kb
-        )
+        d_m = movies[code]
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("📛 Nom", callback_data=f"edit_name_{code}"), InlineKeyboardButton("📝 Ma'lumot", callback_data=f"edit_desc_{code}")], [InlineKeyboardButton("🖼 Poster", callback_data=f"edit_poster_{code}"), InlineKeyboardButton("📥 Video ID", callback_data=f"edit_vid_{code}")], [InlineKeyboardButton("📂 Kataloglar (Boshqarish)", callback_data=f"edit_cats_{code}")], [InlineKeyboardButton("🎭 Janrlar (Boshqarish)", callback_data=f"edit_gnrs_{code}")], [InlineKeyboardButton("❌ Chiqish (Tayyor)", callback_data="cancel_edit")]])
+        await query.message.edit_text(f"✏️ '{d_m.get('name', code)}' — nimani tahrirlaysiz?", reply_markup=kb)
         return
 
     if data == "cancel_edit":
         await query.answer()
-        await query.message.edit_text("✅ Tahrirlash tugatildi va barcha o'zgarishlar saqlandi.", reply_markup=None)
+        await query.message.edit_text("✅ Tahrirlash tugatildi va saqlandi.", reply_markup=None)
         await context.bot.send_message(chat_id=user_id, text="Asosiy panel:", reply_markup=get_admin_keyboard())
         return
 
@@ -1327,7 +1158,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         idx = int(data.split("_")[2])
         if 0 <= idx < len(catalogs):
             removed = catalogs.pop(idx)
-            save_and_push("catalogs.json", catalogs, f"Katalog o'chirildi: {removed}")
+            save_and_push("catalogs.json", catalogs, f"Katalog o'chirildi")
             await context.bot.send_message(chat_id=user_id, text=f"✅ Katalog o'chirildi: {removed}", reply_markup=get_admin_keyboard())
         return
 
@@ -1342,42 +1173,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         idx = int(data.split("_")[2])
         if 0 <= idx < len(genres):
             removed = genres.pop(idx)
-            save_and_push("genres.json", genres, f"Janr o'chirildi: {removed}")
+            save_and_push("genres.json", genres, f"Janr o'chirildi")
             await context.bot.send_message(chat_id=user_id, text=f"✅ Janr o'chirildi: {removed}", reply_markup=get_admin_keyboard())
         return
 
     if data == "edit_start":
         await query.answer()
         admin_states[user_id] = "edit_start_text"
-        await context.bot.send_message(
-            chat_id=user_id, 
-            text=f"Current text:\n\n{bot_settings.get('start_text')}\n\n📝 Yangi start matnini yuboring:", 
-            reply_markup=get_cancel_keyboard()
-        )
+        await context.bot.send_message(chat_id=user_id, text="📝 Yangi start xabarini yuboring (Rasm, GIF yoki oddiy Matn bo'lishi mumkin):", reply_markup=get_cancel_keyboard())
         return
 
-    if data == "manage_ch":
-        await query.answer()
-        kb = [[InlineKeyboardButton(f"🗑️ {name}", callback_data=f"del_ch_{ch_id}")] for ch_id, name in channels.items()]
-        kb.append([InlineKeyboardButton("➕ Kanal qo'shish", callback_data="add_ch_start")])
-        await query.message.edit_text("📢 Majburiy obuna kanallari:", reply_markup=InlineKeyboardMarkup(kb))
-        return
-
-    if data == "add_ch_start":
-        await query.answer()
-        admin_states[user_id] = "channel_add"
-        await context.bot.send_message(chat_id=user_id, text="📢 Kanalni formatda yuboring:\n`@username Kanal nomi`", reply_markup=get_cancel_keyboard())
-        return
-
-    if data.startswith("del_ch_"):
-        await query.answer()
-        ch_id = data.replace("del_ch_", "")
-        if ch_id in channels:
-            removed = channels.pop(ch_id)
-            save_and_push("channels.json", channels, f"Kanal o'chirildi: {removed}")
-            await context.bot.send_message(chat_id=user_id, text=f"✅ Kanal olib tashlandi: {removed}", reply_markup=get_admin_keyboard())
-        return
-
+    # KINO QO'SHISH YAKUNIY BOSQICHI (SO'ROVSIZ FULL TUGAYDI)
     if data.startswith("wiz_cat_"):
         await query.answer()
         val = data.replace("wiz_cat_", "")
@@ -1388,11 +1194,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.edit_text("🎭 Janr tanlang (bir nechta bo'lishi mumkin):", reply_markup=InlineKeyboardMarkup(kb))
         else:
             idx = int(val)
-            cat_name = catalogs[idx]
-            if user_id in new_movie_wizard:
-                if cat_name not in new_movie_wizard[user_id]["catalogs"]:
-                    new_movie_wizard[user_id]["catalogs"].append(cat_name)
-                    await query.answer(f"➕ {cat_name} qo'shildi")
+            if user_id in new_movie_wizard and catalogs[idx] not in new_movie_wizard[user_id]["catalogs"]:
+                new_movie_wizard[user_id]["catalogs"].append(catalogs[idx])
+                await query.answer(f"➕ Qo'shildi")
         return
 
     if data.startswith("wiz_gen_"):
@@ -1402,72 +1206,28 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             wiz = new_movie_wizard.pop(user_id, None)
             if wiz:
                 code = wiz["code"]
-                movies[code] = {
-                    "name": wiz["name"], "desc": wiz["desc"],
-                    "poster": wiz["poster"], "video_id": wiz["video_id"],
-                    "catalogs": wiz["catalogs"], "genres": wiz["genres"]
-                }
+                movies[code] = {"name": wiz["name"], "desc": wiz["desc"], "poster": wiz["poster"], "video_id": wiz["video_id"], "catalogs": wiz["catalogs"], "genres": wiz["genres"]}
                 save_and_push("movies.json", movies, f"Yangi kino qo'shildi: {code}")
-                add_log(user_id, f"Kino qo'shildi: {wiz['name']} ({code})")
                 admin_states[user_id] = None
-                
-                kb_confirm = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("✅ Ha (Yuborilsin)", callback_data=f"alert_new_{code}")],
-                    [InlineKeyboardButton("❌ Yo'q (Shart emas)", callback_data="alert_cancel")]
-                ])
-                await query.message.edit_text(
-                    f"🎉 '{wiz['name']}' kinosi muvaffaqiyatli qo'shildi!\n\n"
-                    f"📢 Ushbu yangi kino haqica barcha foydalanuvchilarga xabar berilsinmi?",
-                    reply_markup=kb_confirm
-                )
+                await query.message.edit_text(f"🎉 '{wiz['name']}' kinosi muvaffaqiyatli saqlandi va jarayon yakunlandi!", reply_markup=get_admin_keyboard())
         else:
             idx = int(val)
-            gen_name = genres[idx]
-            if user_id in new_movie_wizard:
-                if gen_name not in new_movie_wizard[user_id]["genres"]:
-                    new_movie_wizard[user_id]["genres"].append(gen_name)
-                    await query.answer(f"➕ {gen_name} qo'shildi")
-        return
-
-    if data.startswith("alert_new_"):
-        await query.answer()
-        movie_code = data.split("_")[2]
-        if movie_code in movies:
-            name = movies[movie_code].get("name", movie_code).upper()
-            alert_text = f"🎬 Yangi kino qo'shildi!\n\n🍿 Nomi: {name}\n🔑 Kodi: {movie_code}\n\n🤖 Botga kirib kino kodini yuboring va tomosha qiling!"
-            
-            await query.message.edit_text("🚀 Foydalanuvchilarga xabar yuborilmoqda, kuting...")
-            success, fail = 0, 0
-            for uid in list(users):
-                try:
-                    await context.bot.send_message(chat_id=uid, text=alert_text)
-                    success += 1
-                except Exception:
-                    fail += 1
-            await context.bot.send_message(
-                chat_id=user_id, 
-                text=f"📊 Yangilik tarqatildi:\n✅ Yuborildi: {success}\n❌ Muammo: {fail}", 
-                reply_markup=get_admin_keyboard()
-            )
-        return
-
-    if data == "alert_cancel":
-        await query.answer("Xabar bekor qilindi")
-        await query.message.edit_text("✅ Tushunarli. Foydalanuvchilarga bildirishnoma yuborilmadi.", reply_markup=get_admin_keyboard())
+            if user_id in new_movie_wizard and genres[idx] not in new_movie_wizard[user_id]["genres"]:
+                new_movie_wizard[user_id]["genres"].append(genres[idx])
+                await query.answer(f"➕ Qo'shildi")
         return
 
     if data == "broadcast_confirm":
         await query.answer()
         text_to_send = context.user_data.get("broadcast_text")
         if text_to_send:
-            await query.message.edit_text("🚀 Xabar yuborilmoqda, kuting...")
+            await query.message.edit_text("🚀 Xabar yuborilmoqda...")
             success, fail = 0, 0
             for uid in list(users):
                 try:
                     await context.bot.send_message(chat_id=uid, text=text_to_send)
                     success += 1
-                except Exception:
-                    fail += 1
+                except Exception: fail += 1
             await context.bot.send_message(chat_id=user_id, text=f"📊 Natija:\n✅ Yuborildi: {success}\n❌ Muammo: {fail}", reply_markup=get_admin_keyboard())
         return
 
@@ -1476,39 +1236,25 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.delete()
         return
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    pass
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None: pass
 
-# Render port so'ragani uchun soxta veb-server
 def run_fake_server():
-    port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(("0.0.0.0", port), SimpleHTTPRequestHandler)
+    server = HTTPServer(("0.0.0.0", int(os.environ.get("PORT", 8080))), SimpleHTTPRequestHandler)
     server.serve_forever()
 
-# YANGI: keep-alive - bot "uxlab qolib" RAM tozalanishining oldini olish uchun
-# o'zini har 4 daqiqada bir marta so'rab turadi (Render kabi bepul hostinglar
-# bir necha daqiqa harakatsizlikdan keyin botni to'xtatib qo'yadi).
 def keep_alive_loop():
-    if not RENDER_EXTERNAL_URL:
-        return
+    if not RENDER_EXTERNAL_URL: return
     while True:
         threading.Event().wait(240)
-        try:
-            requests.get(RENDER_EXTERNAL_URL, timeout=10)
-        except Exception:
-            pass
+        try: requests.get(RENDER_EXTERNAL_URL, timeout=10)
+        except Exception: pass
 
 def main():
     load_data()
     if not TOKEN: return
     
-    # Soxta serverni alohida oqimda ishga tushirish
     threading.Thread(target=run_fake_server, daemon=True).start()
-
-    # YANGI: avto-bekap oqimi - navbatdagi o'zgarishlarni har 60 soniyada GitHub'ga yuboradi
     threading.Thread(target=auto_backup_loop, daemon=True).start()
-
-    # YANGI: keep-alive oqimi - botni "uxlab qolishdan" saqlaydi
     threading.Thread(target=keep_alive_loop, daemon=True).start()
     
     app = ApplicationBuilder().token(TOKEN).build()
@@ -1516,7 +1262,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(InlineQueryHandler(inline_query_handler))
     app.add_handler(CallbackQueryHandler(handle_callback))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_text))
     app.add_error_handler(error_handler)
 
     app.run_polling()
