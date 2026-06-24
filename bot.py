@@ -448,14 +448,23 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         admin_states[user_id] = None
         data = movies[code]
         name = data.get("name", code) if isinstance(data, dict) else code
+        cur_cats = movies[code].get("catalogs", []) if isinstance(movies[code], dict) else []
+        cur_gnrs = movies[code].get("genres", []) if isinstance(movies[code], dict) else []
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("📛 Nom", callback_data=f"edit_name_{code}"),
              InlineKeyboardButton("📝 Ma'lumot", callback_data=f"edit_desc_{code}")],
             [InlineKeyboardButton("🖼 Poster", callback_data=f"edit_poster_{code}"),
              InlineKeyboardButton("📥 Video ID", callback_data=f"edit_vid_{code}")],
+            [InlineKeyboardButton("📂 Katalog", callback_data=f"edit_cats_{code}"),
+             InlineKeyboardButton("🎭 Janr", callback_data=f"edit_gnrs_{code}")],
             [InlineKeyboardButton("❌ Bekor", callback_data="cancel_edit")]
         ])
-        await update.message.reply_text(f"✏️ '{name}' — nimani tahrirlaysiz?", reply_markup=kb)
+        cats_str = ", ".join(cur_cats) if cur_cats else "Yo'q"
+        gnrs_str = ", ".join(cur_gnrs) if cur_gnrs else "Yo'q"
+        await update.message.reply_text(
+            f"✏️ '{name}' — nimani tahrirlaysiz?\n\n📂 Katalog: {cats_str}\n🎭 Janr: {gnrs_str}",
+            reply_markup=kb
+        )
         return
 
     if state and state.startswith("edit_field_"):
@@ -903,6 +912,98 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.delete()
             await context.bot.send_message(chat_id=user_id, text=f"{label} yuboring:", reply_markup=get_cancel_keyboard())
             return
+
+    if data.startswith("edit_cats_"):
+        code = data[10:]
+        if code not in movies: return
+        admin_states[user_id] = f"editing_cats_{code}"
+        cur = movies[code].get("catalogs", []) if isinstance(movies[code], dict) else []
+        kb = []
+        for i, cat in enumerate(catalogs):
+            pn = cat.replace("✅ ", "")
+            dn = f"✅ {pn}" if pn in cur else pn
+            kb.append([InlineKeyboardButton(dn, callback_data=f"ecwiz_cat_{i}_{code}")])
+        kb.append([InlineKeyboardButton("✅ Saqlash", callback_data=f"ecwiz_cat_done_{code}")])
+        cur_str = ", ".join(cur) if cur else "Yo'q"
+        await query.message.edit_text(f"📂 Katalog tanlang (hozirgi: {cur_str}):", reply_markup=InlineKeyboardMarkup(kb))
+        return
+
+    if data.startswith("edit_gnrs_"):
+        code = data[10:]
+        if code not in movies: return
+        admin_states[user_id] = f"editing_gnrs_{code}"
+        cur = movies[code].get("genres", []) if isinstance(movies[code], dict) else []
+        kb = []
+        for i, gnr in enumerate(genres):
+            pn = gnr.replace("✅ ", "")
+            dn = f"✅ {pn}" if pn in cur else pn
+            kb.append([InlineKeyboardButton(dn, callback_data=f"ecwiz_gnr_{i}_{code}")])
+        kb.append([InlineKeyboardButton("✅ Saqlash", callback_data=f"ecwiz_gnr_done_{code}")])
+        cur_str2 = ", ".join(cur) if cur else "Yo'q"
+        await query.message.edit_text(f"🎭 Janr tanlang (hozirgi: {cur_str2}):", reply_markup=InlineKeyboardMarkup(kb))
+        return
+
+    if data.startswith("ecwiz_cat_"):
+        rest = data[10:]
+        if rest.startswith("done_"):
+            code = rest[5:]
+            admin_states[user_id] = None
+            save_and_push("movies.json", movies, f"Kino katalogi yangilandi: {code}")
+            add_log(user_id, f"Kino katalogi yangilandi: {code}")
+            await query.message.delete()
+            cur = movies[code].get("catalogs", []) if code in movies else []
+            saved_cats = ", ".join(cur) if cur else "Yo'q"
+            await context.bot.send_message(chat_id=user_id, text=f"✅ Katalog saqlandi: {saved_cats}", reply_markup=get_admin_keyboard())
+        else:
+            parts2 = rest.split("_", 1)
+            idx = int(parts2[0])
+            code = parts2[1]
+            if code not in movies: return
+            if "catalogs" not in movies[code]: movies[code]["catalogs"] = []
+            cur = movies[code]["catalogs"]
+            pn = catalogs[idx].replace("✅ ", "")
+            if pn in cur: cur.remove(pn)
+            else: cur.append(pn)
+            kb = []
+            for i, cat in enumerate(catalogs):
+                p = cat.replace("✅ ", "")
+                d2 = f"✅ {p}" if p in cur else p
+                kb.append([InlineKeyboardButton(d2, callback_data=f"ecwiz_cat_{i}_{code}")])
+            kb.append([InlineKeyboardButton("✅ Saqlash", callback_data=f"ecwiz_cat_done_{code}")])
+            await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(kb))
+            await query.answer()
+        return
+
+    if data.startswith("ecwiz_gnr_"):
+        rest = data[10:]
+        if rest.startswith("done_"):
+            code = rest[5:]
+            admin_states[user_id] = None
+            save_and_push("movies.json", movies, f"Kino janri yangilandi: {code}")
+            add_log(user_id, f"Kino janri yangilandi: {code}")
+            await query.message.delete()
+            cur = movies[code].get("genres", []) if code in movies else []
+            saved_gnrs = ", ".join(cur) if cur else "Yo'q"
+            await context.bot.send_message(chat_id=user_id, text=f"✅ Janr saqlandi: {saved_gnrs}", reply_markup=get_admin_keyboard())
+        else:
+            parts2 = rest.split("_", 1)
+            idx = int(parts2[0])
+            code = parts2[1]
+            if code not in movies: return
+            if "genres" not in movies[code]: movies[code]["genres"] = []
+            cur = movies[code]["genres"]
+            pn = genres[idx].replace("✅ ", "")
+            if pn in cur: cur.remove(pn)
+            else: cur.append(pn)
+            kb = []
+            for i, gnr in enumerate(genres):
+                p = gnr.replace("✅ ", "")
+                d2 = f"✅ {p}" if p in cur else p
+                kb.append([InlineKeyboardButton(d2, callback_data=f"ecwiz_gnr_{i}_{code}")])
+            kb.append([InlineKeyboardButton("✅ Saqlash", callback_data=f"ecwiz_gnr_done_{code}")])
+            await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(kb))
+            await query.answer()
+        return
 
     # KATALOG/JANR ADMIN
     if data == "add_cat":
