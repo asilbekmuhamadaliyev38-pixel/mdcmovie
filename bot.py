@@ -229,6 +229,71 @@ def stars_str(avg):
     full = round(avg)
     return "⭐" * full + "☆" * (5 - full) if avg > 0 else "Baholanmagan"
 
+# ==================== YANGI: TOP BAHOLANGANLAR SAHIFALASH ====================
+TOP_RATED_PAGE_SIZE = 10
+
+def get_sorted_top_rated():
+    scored = []
+    for code in movies:
+        avg, count = get_avg_rating(code)
+        if count > 0:
+            scored.append((code, avg, count))
+    scored.sort(key=lambda x: (x[1], x[2]), reverse=True)
+    return scored
+
+def build_top_rated_keyboard(scored, page):
+    start = page * TOP_RATED_PAGE_SIZE
+    end = start + TOP_RATED_PAGE_SIZE
+    page_items = scored[start:end]
+
+    kb = []
+    row = []
+    for offset, (code, avg, count) in enumerate(page_items):
+        num = start + offset + 1
+        row.append(InlineKeyboardButton(str(num), callback_data=f"toprated_open_{code}"))
+        if len(row) == 5:
+            kb.append(row)
+            row = []
+    if row:
+        kb.append(row)
+
+    nav_row = []
+    if start > 0:
+        nav_row.append(InlineKeyboardButton("◀️ Oldingi sahifa", callback_data=f"toprated_page_{page-1}"))
+    if end < len(scored):
+        nav_row.append(InlineKeyboardButton("Keyingi sahifa ▶️", callback_data=f"toprated_page_{page+1}"))
+    if nav_row:
+        kb.append(nav_row)
+
+    return InlineKeyboardMarkup(kb), page_items, start
+
+async def show_top_rated_page(message, bot, page, edit=False):
+    scored = get_sorted_top_rated()
+    if not scored:
+        text = "⭐ Hali hech qanday kino baholanmagan."
+        if edit:
+            await message.edit_text(text)
+        else:
+            await bot.send_message(chat_id=message.chat_id, text=text)
+        return
+
+    kb, page_items, start = build_top_rated_keyboard(scored, page)
+    lines = []
+    for offset, (code, avg, count) in enumerate(page_items):
+        num = start + offset + 1
+        d = movies[code]
+        name = d.get("name", code).upper() if isinstance(d, dict) else code.upper()
+        lines.append(f"{num}. {name} — {stars_str(avg)} ({avg:.1f}/5, {count} ovoz)")
+
+    total_pages = (len(scored) - 1) // TOP_RATED_PAGE_SIZE + 1
+    cur_page_num = page + 1
+    text = f"⭐ Top baholangan kinolar ({cur_page_num}/{total_pages}-sahifa):\n\n" + "\n".join(lines) + "\n\n👇 Kerakli kinoning raqamini bosing:"
+
+    if edit:
+        await message.edit_text(text, reply_markup=kb)
+    else:
+        await bot.send_message(chat_id=message.chat_id, text=text, reply_markup=kb)
+
 # ==================== YANGI: QISMLI KINO YORDAMCHI FUNKSIYALARI ====================
 def get_video_ids(data):
     """movie ma'lumotidan video_id ro'yxatini qaytaradi (har doim list)."""
@@ -927,24 +992,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_movie(user_id, movie_code, context.bot)
         return
 
-    # ==================== YANGI: TOP BAHOLANGAN KINOLAR ====================
-    if data == "top_rated":
+    # ==================== YANGI: TOP BAHOLANGAN KINOLAR (sahifalash bilan) ====================
+    if data == "top_rated" or data.startswith("toprated_page_"):
         await query.answer()
-        scored = []
-        for code in movies:
-            avg, count = get_avg_rating(code)
-            if count > 0:
-                scored.append((code, avg, count))
-        if not scored:
-            await context.bot.send_message(chat_id=user_id, text="⭐ Hali hech qanday kino baholanmagan.")
-            return
-        scored.sort(key=lambda x: (x[1], x[2]), reverse=True)
-        lines = []
-        for i, (code, avg, count) in enumerate(scored[:10], 1):
-            d = movies[code]
-            name = d.get("name", code).upper() if isinstance(d, dict) else code.upper()
-            lines.append(f"{i}. {name} — {stars_str(avg)} ({avg:.1f}/5, {count} ovoz) | Kod: {code}")
-        await context.bot.send_message(chat_id=user_id, text="⭐ Top baholangan kinolar:\n\n" + "\n".join(lines))
+        page = 0
+        if data.startswith("toprated_page_"):
+            page = int(data.replace("toprated_page_", ""))
+        await show_top_rated_page(query.message, context.bot, page, edit=data.startswith("toprated_page_"))
+        return
+
+    if data.startswith("toprated_open_"):
+        await query.answer()
+        movie_code = data.replace("toprated_open_", "")
+        await send_movie(user_id, movie_code, context.bot)
         return
 
     # ==================== YANGI: BAHOLASH MENYUSI ====================
@@ -993,11 +1053,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if movie_code in movies:
             total_parts = len(get_video_ids(movies[movie_code]))
             kb = build_parts_list_keyboard(movie_code, total_parts)
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=f"📋 Qismlar ro'yxati ({total_parts} ta) — kerakli qismni tanlang:",
-                reply_markup=kb
-            )
+            try:
+                await query.message.edit_reply_markup(reply_markup=kb)
+            except Exception:
+                pass
         return
 
     if data.startswith("part_back_"):
@@ -1005,7 +1064,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         movie_code = data.replace("part_back_", "")
         progress_key = get_part_progress_key(user_id, movie_code)
         current = part_progress.get(progress_key, 0)
-        await send_movie_part(user_id, movie_code, current, context.bot)
+        if movie_code in movies:
+            total_parts = len(get_video_ids(movies[movie_code]))
+            kb = build_part_nav_keyboard(movie_code, current, total_parts)
+            try:
+                await query.message.edit_reply_markup(reply_markup=kb)
+            except Exception:
+                pass
         return
 
     if data == "check":
