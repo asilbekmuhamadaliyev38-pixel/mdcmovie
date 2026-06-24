@@ -921,13 +921,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await show_top_rated_page(query.message, context.bot, page, edit=False)
         return
 
-    if data.startswith("toprated_open_") or data.startswith("mysaved_open_"):
+    if data.startswith("toprated_open_"):
         await query.answer()
-        code = data.replace("toprated_open_", "").replace("mysaved_open_", "")
-        if data.startswith("mysaved_open_"):
-            await show_saved_movie_detail(user_id, context.bot, code)
-        else:
-            await send_movie(user_id, code, context.bot)
+        code = data.replace("toprated_open_", "")
+        await send_movie(user_id, code, context.bot)
+        return
+
+    if data.startswith("mysaved_open_"):
+        await query.answer()
+        code = data.replace("mysaved_open_", "")
+        try: await query.message.delete()
+        except Exception: pass
+        await show_saved_movie_detail(user_id, context.bot, code)
         return
 
     if data == "mysaved_back" or data.startswith("mysaved_back_"):
@@ -956,8 +961,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # BAHOLASH TUGMALARI
     if data.startswith("rate_menu_"):
-        await query.answer()
         movie_code = data.replace("rate_menu_", "")
+        existing = get_user_rating(movie_code, user_id)
+        if existing is not None:
+            await query.answer(f"⚠️ Siz oldin {existing}⭐️ baho bergansiz!", show_alert=True)
+            return
+        await query.answer()
         avg, count = get_avg_rating(movie_code)
         
         kb_row = [InlineKeyboardButton(f"{i}⭐️", callback_data=f"rate_{movie_code}_{i}") for i in range(1, 6)]
@@ -973,6 +982,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("rate_") and not data.startswith("rate_menu_"):
         rest = data[len("rate_"):]
         movie_code, _, score_str = rest.rpartition("_")
+        existing = get_user_rating(movie_code, user_id)
+        if existing is not None:
+            await query.answer(f"⚠️ Siz oldin {existing}⭐️ baho bergansiz!", show_alert=True)
+            return
         score = int(score_str)
         set_rating(movie_code, user_id, score)
         avg, _ = get_avg_rating(movie_code)
@@ -1013,8 +1026,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "go_to_main_menu":
         await query.answer()
-        try: await query.message.delete()
-        except Exception: pass
+        msg = query.message
+        is_movie_msg = bool(msg.video or msg.document or msg.audio)
+        if not is_movie_msg:
+            try: await msg.delete()
+            except Exception: pass
         await send_welcome_message(user_id, context.bot, query.from_user.first_name)
         return
 
