@@ -6,6 +6,7 @@ from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
     InlineQueryResultArticle,
     InputTextMessageContent
 )
@@ -22,7 +23,7 @@ from telegram.ext import (
 # ==================== SOZLAMALAR ====================
 TOKEN = os.environ.get("TOKEN")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "5837813502"))
-SOURCE_CHANNEL = os.environ.get("SOURCE_CHANNEL", "-1004381790658")
+SOURCE_CHANNEL = os.environ.get("SOURCE_CHANNEL", "-1003926152488")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 REPO_NAME = os.environ.get("REPO_NAME", "asilbekmuhamadaliyev38-pixel/mdcmovie")
@@ -40,7 +41,6 @@ admin_states = {}
 new_movie_wizard = {}
 ad_post_id = None
 
-# Standart sozlamalar (Barchasini admin paneldan tahrirlash mumkin)
 bot_settings = {
     "protect_content": True,
     "start_text": (
@@ -49,10 +49,7 @@ bot_settings = {
         "🚀 Shunchaki:\n"
         "— Kino yoki serialning kodini yuboring\n"
         "— Pastdagi bo'limlardan birini tanlang va zavqlaning! 😉"
-    ),
-    "btn_search": "🔍 Qidiruv",
-    "btn_catalog": "📂 Katalog bo'yicha",
-    "btn_genre": "🎭 Janr bo'yicha"
+    )
 }
 
 # ==================== GITHUB TIZIMI ====================
@@ -64,7 +61,7 @@ def github_get(filename):
         res = requests.get(url, headers=headers, timeout=12)
         if res.status_code == 200 and "content" in res.json():
             return json.loads(base64.b64decode(res.json()["content"]).decode("utf-8"))
-    except Exception as e: print(f"GitHub o'qish xatosi ({filename}): {e}")
+    except Exception: pass
     return None
 
 def github_put(filename, data, message):
@@ -78,7 +75,7 @@ def github_put(filename, data, message):
         payload = {"message": message, "content": content, "branch": "main"}
         if sha: payload["sha"] = sha
         requests.put(url, headers=headers, json=payload, timeout=12)
-    except Exception as e: print(f"GitHub yozish xatosi ({filename}): {e}")
+    except Exception: pass
 
 def read_file(filename, default):
     if GITHUB_TOKEN:
@@ -106,11 +103,8 @@ def load_data():
     channels.update(read_file("channels.json", {}))
     bot_settings.update(read_file("settings.json", bot_settings))
     
-    # Standart kataloglar va janrlar yuklanishi
-    loaded_cats = read_file("catalogs.json", ["🍿 Kinolar", "🎬 Seriallar", "🧸 Multfilmlar"])
-    catalogs.clear(); catalogs.extend(loaded_cats)
-    loaded_gnrs = read_file("genres.json", ["🔥 Jangari", "🤣 Komediya", "😢 Drama", "🚀 Fantastika"])
-    genres.clear(); genres.extend(loaded_gnrs)
+    catalogs.clear(); catalogs.extend(read_file("catalogs.json", ["🍿 Kinolar", "🎬 Seriallar", "🧸 Multfilmlar"]))
+    genres.clear(); genres.extend(read_file("genres.json", ["🔥 Jangari", "🤣 Komediya", "😢 Drama", "🚀 Fantastika"]))
     
     adm = read_file("admins.json", [ADMIN_ID])
     admins.clear(); admins.update(set(adm)); admins.add(ADMIN_ID)
@@ -131,28 +125,28 @@ def track_user(user_id):
         save_and_push("active_users.json", list(active_users), "Faollar yangilandi")
         save_and_push("deleted_users.json", list(deleted_users), "O'chirilganlar yangilandi")
 
-def is_main_admin(user_id): return user_id == ADMIN_ID
 def is_admin(user_id): return user_id in admins
 
-# ==================== INLINE KEYBOARD (XABAR TAGIDAGI TUGMALAR) ====================
+# ==================== STRUKTURALI MENYULAR ====================
 def get_user_inline_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(bot_settings.get("btn_search", "🔍 Qidiruv"), switch_inline_query_current_chat="")],
+        [InlineKeyboardButton("🔍 Qidiruv", switch_inline_query_current_chat="")],
         [
-            InlineKeyboardButton(bot_settings.get("btn_catalog", "📂 Katalog bo'yicha"), callback_data="user_show_catalogs"),
-            InlineKeyboardButton(bot_settings.get("btn_genre", "🎭 Janr bo'yicha"), callback_data="user_show_genres")
+            InlineKeyboardButton("📂 Katalog bo'yicha", callback_data="user_show_catalogs"),
+            InlineKeyboardButton("🎭 Janr bo'yicha", callback_data="user_show_genres")
         ]
     ])
 
-# Admin klaviatura (Bu pastdagi katta tugmaligicha qoladi - boshqarish qulay bo'lishi uchun)
 def get_admin_keyboard():
-    from telegram import ReplyKeyboardMarkup
     return ReplyKeyboardMarkup([
         ["➕ Kino qo'shish", "🗑️ Kino o'chirish"],
         ["📁 Katalog/Janr Sozlamalari", "📊 Statistika"],
         ["📣 Hammaga xabar", "📢 Reklama xabar"],
         ["⚙️ Bot Sozlamalari"]
     ], resize_keyboard=True)
+
+def get_cancel_keyboard():
+    return ReplyKeyboardMarkup([["❌ Bekor qilish"]], resize_keyboard=True)
 
 # ==================== OBUNA TEKSHIRUVI ====================
 async def is_joined(bot, user_id):
@@ -187,16 +181,22 @@ async def send_movie(chat_id, movie_code, bot):
     else: video_ids = [str(video_ids_raw)]
 
     movie_kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton(bot_settings.get("btn_search", "🔍 Film qidirish"), switch_inline_query_current_chat="")],
+        [InlineKeyboardButton("🔍 Film qidirish", switch_inline_query_current_chat="")],
         [InlineKeyboardButton("🏠 Bosh menyu", callback_data="go_to_main_menu")]
     ])
     protect = False if is_admin(chat_id) else bot_settings.get("protect_content", True)
 
+    success_sent = False
     for vid in video_ids:
         try:
             await bot.copy_message(chat_id=chat_id, from_chat_id=SOURCE_CHANNEL, message_id=int(vid), reply_markup=movie_kb, protect_content=protect)
+            success_sent = True
         except Exception:
-            await bot.send_message(chat_id=chat_id, text=f"❌ Film qismi topilmadi (ID: {vid}). Bot manba kanalda admin bo'lishi kerak.")
+            pass
+
+    if not success_sent:
+        await bot.send_message(chat_id=chat_id, text="❌ Ushbu kino fayli topilmadi yoki o'chirilgan.")
+        return True
 
     if ad_post_id and not is_admin(chat_id):
         try: await bot.copy_message(chat_id=chat_id, from_chat_id=SOURCE_CHANNEL, message_id=int(ad_post_id), protect_content=True)
@@ -219,7 +219,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if is_admin(user_id):
         admin_states[user_id] = None
-        await update.message.reply_text("👑 Admin paneli yuklandi:", reply_markup=get_admin_keyboard())
+        await update.message.reply_text("👑 Admin boshqaruv paneli yuklandi. Menyudan foydalaning:", reply_markup=get_admin_keyboard())
         return
 
     if not await is_joined(context.bot, user_id):
@@ -278,14 +278,14 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             
     await update.inline_query.answer(results[:50], cache_time=0)
 
-# ==================== ADMIN MATNLI AMALLARI ====================
+# ==================== AMALLARNI QABUL QILISH ====================
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ad_post_id, bot_settings, catalogs, genres, movies
     user_id = update.effective_user.id
     text = update.message.text.strip()
     track_user(user_id)
 
-    # USER REAKSIYASI (FAQAT KOD KIRITGANDA)
+    # ODDIY FOYDALANUVCHILAR
     if not is_admin(user_id):
         if not await is_joined(context.bot, user_id):
             await update.message.reply_text("❗ Avval kanallarga obuna bo'ling!", reply_markup=await get_subscription_keyboard(context.bot))
@@ -294,33 +294,30 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Bunday kodli kino topilmadi.")
         return
 
+    # ADMIN AMALLARI
     state = admin_states.get(user_id)
-    from telegram import ReplyKeyboardMarkup
-    cancel_kb = ReplyKeyboardMarkup([["❌ Bekor qilish"]], resize_keyboard=True)
 
     if text in ["❌ Bekor qilish", "🏠 Bosh menyu"]:
         admin_states[user_id] = None
         new_movie_wizard.pop(user_id, None)
-        await update.message.reply_text("🏠 Asosiy boshqaruv paneli:", reply_markup=get_admin_keyboard())
+        await update.message.reply_text("🏠 Asosiy panelga qaytdingiz:", reply_markup=get_admin_keyboard())
         return
 
-    # KINO O'CHIRISH STEP
     if state == "delete_movie_by_code":
         code_to_del = text.lower()
         if code_to_del in movies:
             del movies[code_to_del]
             save_and_push("movies.json", movies, f"Kino o'chirildi: {code_to_del}")
             admin_states[user_id] = None
-            await update.message.reply_text(f"✅ Kod {code_to_del} bo'lgan kino muvaffaqiyatli o'chirildi!", reply_markup=get_admin_keyboard())
+            await update.message.reply_text(f"✅ Kod {code_to_del} bo'lgan kino o'chirildi!", reply_markup=get_admin_keyboard())
         else:
-            await update.message.reply_text("❌ Bunday kodli kino topilmadi! Iltimos, kodni to'g'ri kiriting yoki bekor qiling:", reply_markup=cancel_kb)
+            await update.message.reply_text("❌ Bunday kodli kino topilmadi. Qayta kiriting yoki bekor qiling:", reply_markup=get_cancel_keyboard())
         return
 
-    # KINO QO'SHISH STEP
     if state == "add_movie_text":
         lines = [l.strip() for l in text.split("\n") if l.strip()]
         if len(lines) < 5:
-            await update.message.reply_text("❌ Xato! Shablon bo'yicha 5 ta qatorni to'ldirib yuboring:", reply_markup=cancel_kb)
+            await update.message.reply_text("❌ Xato! Shablon bo'yicha to'liq 5 ta qatorni to'ldirib yuboring:", reply_markup=get_cancel_keyboard())
             return
         new_movie_wizard[user_id] = {
             "name": lines[0], "desc": lines[1], "code": lines[2].lower(), "poster": lines[3], "video_id": lines[4],
@@ -330,11 +327,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = []
         for i in range(0, len(catalogs), 2):
             row = [InlineKeyboardButton(catalogs[i], callback_data=f"wiz_cat_{i}")]
-            if i+1 < len(catalogs):
-                row.append(InlineKeyboardButton(catalogs[i+1], callback_data=f"wiz_cat_{i+1}"))
+            if i+1 < len(catalogs): row.append(InlineKeyboardButton(catalogs[i+1], callback_data=f"wiz_cat_{i+1}"))
             kb.append(row)
         kb.append([InlineKeyboardButton("➡️ Keyingi (Janr tanlash)", callback_data="wiz_cat_done")])
-        await update.message.reply_text("🗂️ Kinoni qaysi **Kataloglarga** qo'shasiz? (Bir nechta tanlash mumkin):", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+        await update.message.reply_text("🗂️ Kinoni qaysi **Kataloglarga** qo'shasiz?", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
         return
 
     if state == "add_custom_catalog":
@@ -355,40 +351,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bot_settings["start_text"] = text
         save_and_push("settings.json", bot_settings, "Start matni o'zgartirildi")
         admin_states[user_id] = None
-        await update.message.reply_text("✅ Start salomlashish matni o'zgartirildi!", reply_markup=get_admin_keyboard())
-        return
-
-    # TUGMALARNI TAHRIRLASH STEPLARI
-    if state == "edit_btn_search_text":
-        bot_settings["btn_search"] = text
-        save_and_push("settings.json", bot_settings, "Qidiruv tugmasi o'zgardi")
-        admin_states[user_id] = None
-        await update.message.reply_text("✅ Qidiruv tugmasi matni o'zgartirildi!", reply_markup=get_admin_keyboard())
-        return
-
-    if state == "edit_btn_catalog_text":
-        bot_settings["btn_catalog"] = text
-        save_and_push("settings.json", bot_settings, "Katalog tugmasi o'zgardi")
-        admin_states[user_id] = None
-        await update.message.reply_text("✅ Katalog tugmasi matni o'zgartirildi!", reply_markup=get_admin_keyboard())
-        return
-
-    if state == "edit_btn_genre_text":
-        bot_settings["btn_genre"] = text
-        save_and_push("settings.json", bot_settings, "Janr tugmasi o'zgardi")
-        admin_states[user_id] = None
-        await update.message.reply_text("✅ Janr tugmasi matni o'zgartirildi!", reply_markup=get_admin_keyboard())
+        await update.message.reply_text("✅ Start salomlashish matni muvaffaqiyatli o'zgartirildi!", reply_markup=get_admin_keyboard())
         return
 
     if state == "channel_add_universal":
         parts = text.split(" ", 1)
         if len(parts) < 2:
-            await update.message.reply_text("❌ Xato format. Namuna:\n`@username Kanal Nomi` yoki `-100123456 Kanal Nomi`", reply_markup=cancel_kb, parse_mode="Markdown")
+            await update.message.reply_text("❌ Xato format. Namuna:\n`@username Kanal Nomi`", reply_markup=get_cancel_keyboard())
             return
         channels[parts[0].strip()] = parts[1].strip()
         save_and_push("channels.json", channels, "Kanal ro'yxati yangilandi")
         admin_states[user_id] = None
-        await update.message.reply_text("✅ Majburiy obuna kanali saqlandi!", reply_markup=get_admin_keyboard())
+        await update.message.reply_text("✅ Majburiy obuna kanali qo'shildi!", reply_markup=get_admin_keyboard())
         return
 
     if state == "broadcast":
@@ -405,68 +379,65 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Reklama posti o'rnatildi!", reply_markup=get_admin_keyboard())
         return
 
-    # PANEL TUGMALARI
+    # ASOSIY MENU KLAVIATURASI BOSILGANDA
     if text == "➕ Kino qo'shish":
         admin_states[user_id] = "add_movie_text"
         shablon = (
             "➕ **Kino qo'shish uchun quyidagi 5 qatorli shablonni to'ldirib yuboring:**\n\n"
             "`Garri Potter 3`\n"
-            "`Sehrgarlar haqida qiziqarli film`\n"
+            "`Sehrgarlar haqida film`\n"
             "`300`\n"
             "`https://images.com/poster.jpg`\n"
-            "`1254,1255`"
+            "`1254`"
         )
-        await update.message.reply_text(shablon, reply_markup=cancel_kb, parse_mode="Markdown")
+        await update.message.reply_text(shablon, reply_markup=get_cancel_keyboard(), parse_mode="Markdown")
         return
 
     if text == "🗑️ Kino o'chirish":
         admin_states[user_id] = "delete_movie_by_code"
-        await update.message.reply_text("🗑️ O'chirmoqchi bo'lgan kino kodini (masalan: `35`) yuboring:", reply_markup=cancel_kb)
+        await update.message.reply_text("🗑️ O'chirmoqchi bo'lgan kino kodini yuboring:", reply_markup=get_cancel_keyboard())
         return
 
     if text == "📁 Katalog/Janr Sozlamalari":
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("➕ Yangi Katalog qo'shish", callback_data="add_cat"), InlineKeyboardButton("➕ Yangi Janr qo'shish", callback_data="add_gen")],
-            [InlineKeyboardButton("🗑️ Katalogni o'chirish", callback_data="list_del_cat"), InlineKeyboardButton("🗑️ Janrni o'chirish", callback_data="list_del_gen")]
+            [InlineKeyboardButton("🗑️ Katalogni o'chirish", callback_data="list_del_cat"), InlineKeyboardButton("🗑️ Janrni o'chirish", callback_data="list_del_gen")],
+            [InlineKeyboardButton("🏠 Asosiy panelga Qaytish", callback_data="admin_return_main")]
         ])
         await update.message.reply_text("📁 **Katalog va Janr sozlamalari:**", reply_markup=kb, parse_mode="Markdown")
         return
 
     if text == "📊 Statistika":
-        bot_info = await context.bot.get_me()
         stat_msg = (
             "📊 BOT STATISTIKASI\n\n"
-            f"@{bot_info.username}\n"
             f"▪️Foydalanuvchilar: {len(users)}\n"
             f"▫️Faol: {len(active_users)}\n"
             f"▫️O'chirilgan: {len(deleted_users)}\n"
             f"▪️Kinolar soni: {len(movies)}"
         )
-        await update.message.reply_text(stat_msg)
+        await update.message.reply_text(stat_msg, reply_markup=get_admin_keyboard())
         return
 
     if text == "📣 Hammaga xabar":
         admin_states[user_id] = "broadcast"
-        await update.message.reply_text("Barcha foydalanuvchilarga boradigan xabarni yozing:", reply_markup=cancel_kb)
+        await update.message.reply_text("Barcha foydalanuvchilarga boradigan matnni yozing:", reply_markup=get_cancel_keyboard())
         return
 
     if text == "📢 Reklama xabar":
         admin_states[user_id] = "set_ad"
-        await update.message.reply_text("Reklama Post ID raqamini kiriting (O'chirish uchun 0):", reply_markup=cancel_kb)
+        await update.message.reply_text("Manba kanaldagi Reklama Post ID raqamini kiriting (O'chirish uchun 0):", reply_markup=get_cancel_keyboard())
         return
 
     if text == "⚙️ Bot Sozlamalari":
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("📝 Start matnini o'zgartirish", callback_data="edit_start")],
-            [InlineKeyboardButton("🔍 Qidiruv tugmasini tahrirlash", callback_data="edit_b_search")],
-            [InlineKeyboardButton("📂 Katalog tugmasini tahrirlash", callback_data="edit_b_catalog")],
-            [InlineKeyboardButton("🎭 Janr tugmasini tahrirlash", callback_data="edit_b_genre")],
-            [InlineKeyboardButton("📢 Majburiy Kanallar", callback_data="manage_ch")]
+            [InlineKeyboardButton("📢 Majburiy Kanallar", callback_data="manage_ch")],
+            [InlineKeyboardButton("🏠 Asosiy panelga Qaytish", callback_data="admin_return_main")]
         ])
         await update.message.reply_text("⚙️ **Bot sozlamalari bo'limi:**", reply_markup=kb, parse_mode="Markdown")
         return
 
-# ==================== CALLBACKS (INLINE AMALLAR) ====================
+# ==================== CALLBACKS (INLINE FILTRLAR) ====================
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global movies, channels, catalogs, genres, users, active_users, deleted_users, bot_settings
     query = update.callback_query
@@ -475,7 +446,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "check":
         if await is_joined(context.bot, user_id):
-            await query.answer("✅ Rahmat, obuna tasdiqlandi!")
+            await query.answer("✅ Obuna tasdiqlandi!")
             await query.message.delete()
             await context.bot.send_message(chat_id=user_id, text=bot_settings.get("start_text", "").format(name=query.from_user.first_name), reply_markup=get_user_inline_keyboard())
         else:
@@ -487,13 +458,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=user_id, text=bot_settings.get("start_text", "").format(name=query.from_user.first_name), reply_markup=get_user_inline_keyboard())
         return
 
-    # USER INLINE BOSILGANDA (KATALOG YOKI JANRLAR KO'RSATISH)
+    # FOYDALANUVCHILAR UCHUN FILTRLAR
     if data == "user_show_catalogs":
         kb = []
         for i in range(0, len(catalogs), 2):
             row = [InlineKeyboardButton(catalogs[i], switch_inline_query_current_chat=f"katalog:{catalogs[i]}")]
-            if i+1 < len(catalogs):
-                row.append(InlineKeyboardButton(catalogs[i+1], switch_inline_query_current_chat=f"katalog:{catalogs[i+1]}"))
+            if i+1 < len(catalogs): row.append(InlineKeyboardButton(catalogs[i+1], switch_inline_query_current_chat=f"katalog:{catalogs[i+1]}"))
             kb.append(row)
         kb.append([InlineKeyboardButton("⬅️ Orqaga", callback_data="go_to_main_menu")])
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(kb))
@@ -503,16 +473,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = []
         for i in range(0, len(genres), 3):
             row = [InlineKeyboardButton(genres[i], switch_inline_query_current_chat=f"janr:{genres[i]}")]
-            if i+1 < len(genres):
-                row.append(InlineKeyboardButton(genres[i+1], switch_inline_query_current_chat=f"janr:{genres[i+1]}"))
-            if i+2 < len(genres):
-                row.append(InlineKeyboardButton(genres[i+2], switch_inline_query_current_chat=f"janr:{genres[i+2]}"))
+            if i+1 < len(genres): row.append(InlineKeyboardButton(genres[i+1], switch_inline_query_current_chat=f"janr:{genres[i+1]}"))
+            if i+2 < len(genres): row.append(InlineKeyboardButton(genres[i+2], switch_inline_query_current_chat=f"janr:{genres[i+2]}"))
             kb.append(row)
         kb.append([InlineKeyboardButton("⬅️ Orqaga", callback_data="go_to_main_menu")])
         await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(kb))
         return
 
     if not is_admin(user_id): return
+
+    # ADMIN PANELGA INTERFAYSDAN QAYTISH
+    if data == "admin_return_main":
+        await query.message.delete()
+        await context.bot.send_message(chat_id=user_id, text="🏠 Asosiy boshqaruv paneli menyusi qayta tiklandi:", reply_markup=get_admin_keyboard())
+        return
 
     # WIZARD BOSQICHLARI
     if data.startswith("wiz_cat_"):
@@ -528,7 +502,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if i+2 < len(genres): row.append(InlineKeyboardButton(genres[i+2], callback_data=f"wiz_gen_{i+2}"))
                     kb.append(row)
                 kb.append([InlineKeyboardButton("➡️ Yakunlash va Saqlash", callback_data="wiz_gen_done")])
-                await query.message.edit_text("🎭 Endi kinoning **Janrlarini** tanlang (3 tadan joylashgan):", reply_markup=InlineKeyboardMarkup(kb))
+                await query.message.edit_text("🎭 Endi kinoning **Janrlarini** tanlang:", reply_markup=InlineKeyboardMarkup(kb))
             else:
                 c_name = catalogs[int(val)]
                 if c_name not in wiz["catalogs"]: wiz["catalogs"].append(c_name)
@@ -545,7 +519,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 admin_states[user_id] = None
                 new_movie_wizard.pop(user_id, None)
                 await query.message.delete()
-                from telegram import ReplyKeyboardMarkup
                 await context.bot.send_message(chat_id=user_id, text=f"✅ Kino muvaffaqiyatli qo'shildi! Kod: {wiz['code']}", reply_markup=get_admin_keyboard())
             else:
                 g_name = genres[int(val)]
@@ -553,21 +526,22 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.answer(f"➕ {g_name} tanlandi")
         return
 
-    # SOZLAMALAR callbacks
+    # SOZLAMALAR
     if data == "add_cat":
         admin_states[user_id] = "add_custom_catalog"
         await query.message.delete()
-        await context.bot.send_message(chat_id=user_id, text="📝 Yangi katalog nomini premium emojilar bilan yuboring (Masalan: `🌟 2026-kinolari`):")
+        await context.bot.send_message(chat_id=user_id, text="📝 Yangi katalog nomini yuboring (Masalan: 🍿 2026-kinolari):", reply_markup=get_cancel_keyboard())
         return
 
     if data == "add_gen":
         admin_states[user_id] = "add_custom_genre"
         await query.message.delete()
-        await context.bot.send_message(chat_id=user_id, text="📝 Yangi janr nomini yuboring (Masalan: `⚡ Fantastika`):")
+        await context.bot.send_message(chat_id=user_id, text="📝 Yangi janr nomini yuboring (Masalan: ⚡ Fantastika):", reply_markup=get_cancel_keyboard())
         return
 
     if data == "list_del_cat":
         kb = [[InlineKeyboardButton(f"🗑️ {c}", callback_data=f"dc_cat_{i}")] for i, c in enumerate(catalogs)]
+        kb.append([InlineKeyboardButton("🏠 Panelga qaytish", callback_data="admin_return_main")])
         await query.message.edit_text("O'chirish uchun katalogni tanlang:", reply_markup=InlineKeyboardMarkup(kb))
         return
 
@@ -578,10 +552,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             save_and_push("catalogs.json", catalogs, "Katalog o'chirildi")
             await query.answer("O'chirildi")
             await query.message.delete()
+            await context.bot.send_message(chat_id=user_id, text="✅ Katalog o'chirildi", reply_markup=get_admin_keyboard())
         return
 
     if data == "list_del_gen":
         kb = [[InlineKeyboardButton(f"🗑️ {g}", callback_data=f"dc_gen_{i}")] for i, g in enumerate(genres)]
+        kb.append([InlineKeyboardButton("🏠 Panelga qaytish", callback_data="admin_return_main")])
         await query.message.edit_text("O'chirish uchun janrni tanlang:", reply_markup=InlineKeyboardMarkup(kb))
         return
 
@@ -592,36 +568,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             save_and_push("genres.json", genres, "Janr o'chirildi")
             await query.answer("O'chirildi")
             await query.message.delete()
+            await context.bot.send_message(chat_id=user_id, text="✅ Janr o'chirildi", reply_markup=get_admin_keyboard())
         return
 
     if data == "edit_start":
         admin_states[user_id] = "edit_start_text"
         await query.message.delete()
-        await context.bot.send_message(chat_id=user_id, text="📝 Yangi start xabari matnini kiriting. Ism chiqishi kerak bo'lgan joyga `{name}` deb yozing.")
-        return
-
-    if data == "edit_b_search":
-        admin_states[user_id] = "edit_search_btn_text"
-        await query.message.delete()
-        await context.bot.send_message(chat_id=user_id, text="📝 Qidiruv tugmasining yangi matnini premium emojilar bilan yuboring:")
-        return
-
-    if data == "edit_b_catalog":
-        admin_states[user_id] = "edit_btn_catalog_text"
-        await query.message.delete()
-        await context.bot.send_message(chat_id=user_id, text="📝 Katalog tugmasining yangi matnini premium emojilar bilan yuboring:")
-        return
-
-    if data == "edit_b_genre":
-        admin_states[user_id] = "edit_btn_genre_text"
-        await query.message.delete()
-        await context.bot.send_message(chat_id=user_id, text="📝 Janr tugmasining yangi matnini premium emojilar bilan yuboring:")
+        await context.bot.send_message(chat_id=user_id, text="📝 Yangi start xabari matnini kiriting. Ism o'rniga `{name}` deb yozing.", reply_markup=get_cancel_keyboard())
         return
 
     if data == "manage_ch":
         ch_list = "\n".join([f"🔹 {n} (`{i}`)" for i, n in channels.items()]) or "Kanallar yo'q"
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("➕ Qo'shish", callback_data="add_ch_univ"), InlineKeyboardButton("🗑️ O'chirish", callback_data="del_ch_univ")]
+            [InlineKeyboardButton("➕ Qo'shish", callback_data="add_ch_univ"), InlineKeyboardButton("🗑️ O'chirish", callback_data="del_ch_univ")],
+            [InlineKeyboardButton("🏠 Panelga qaytish", callback_data="admin_return_main")]
         ])
         await query.message.edit_text(f"📢 **Majburiy obuna kanallari:**\n\n{ch_list}", reply_markup=kb, parse_mode="Markdown")
         return
@@ -629,11 +589,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "add_ch_univ":
         admin_states[user_id] = "channel_add_universal"
         await query.message.delete()
-        await context.bot.send_message(chat_id=user_id, text="➕ **Kanal qo'shish formatini yuboring:**\n\n`@username Kanal Nomi`\nyoki\n`-100234567890 Kanal Nomi`", parse_mode="Markdown")
+        await context.bot.send_message(chat_id=user_id, text="➕ **Kanal qo'shish formatini yuboring:**\n\n`@username Kanal Nomi`", reply_markup=get_cancel_keyboard())
         return
 
     if data == "del_ch_univ":
         kb = [[InlineKeyboardButton(f"🗑️ {n}", callback_data=f"dc_ch_{i}")] for i, n in channels.items()]
+        kb.append([InlineKeyboardButton("🏠 Panelga qaytish", callback_data="admin_return_main")])
         await query.message.edit_text("O'chirish uchun kanalni tanlang:", reply_markup=InlineKeyboardMarkup(kb))
         return
 
@@ -644,6 +605,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             save_and_push("channels.json", channels, "Kanal o'chirildi")
             await query.answer("O'chirildi")
             await query.message.delete()
+            await context.bot.send_message(chat_id=user_id, text="✅ Kanal o'chirildi", reply_markup=get_admin_keyboard())
         return
 
     if data == "broadcast_confirm":
