@@ -258,13 +258,5 @@
       "Komediya",
       "Sarguzasht"
     ]
-  },
-  "kod": {
-    "name": "Kino bot",
-    "desc": "Test",
-    "poster": "https://poster.jpg",
-    "video_id": "69,70",
-    "catalogs": [],
-    "genres": []
   }
 }
