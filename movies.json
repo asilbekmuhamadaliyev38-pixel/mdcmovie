@@ -17,7 +17,10 @@
     "name": "O'rgimchak Odam: Uyga qaytish     Spider-Man: Homecoming",
     "desc": "1080p  Uzb",
     "poster": "https://files.itv.uz/uploads/content/poster/2025/02/13/3be779a830507d24f58d50fec8735776-q-700x1002.jpeg",
-    "video_id": "9"
+    "video_id": "9",
+    "genres": [
+      "Fantastika"
+    ]
   },
   "7": {
     "name": "O'rgimchak-odam 2: Uydan yiroqda        Spider-Man: Far from Home",
