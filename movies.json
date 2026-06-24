@@ -249,7 +249,9 @@
     "desc": "O'zbek tilida   1080P",
     "poster": "https://i.ibb.co/N2sbYWRr/photo.jpg",
     "video_id": "68",
-    "catalogs": [],
+    "catalogs": [
+      "2026-yil filmlari"
+    ],
     "genres": [
       "Animatsion",
       "Komediya",
