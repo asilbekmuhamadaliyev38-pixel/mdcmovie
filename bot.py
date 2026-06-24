@@ -46,7 +46,15 @@ new_movie_wizard = {}
 ad_post_id = None
 views = {}          
 saved_movies = {}   
-admin_logs = []     
+admin_logs = []
+
+# YANGI: reyting va qism-navigatsiya uchun ma'lumotlar
+ratings = {}        # {"movie_code": {"user_id": baho}}
+part_progress = {}  # {"user_id_movie_code": current_part_index} - foydalanuvchi qaysi qismda turgani
+
+# YANGI: pending o'zgarishlar to'plami - avto-bekap navbati uchun
+_pending_saves = {}      # {filename: (data, message)}
+_pending_saves_lock = threading.Lock()
 
 bot_settings = {
     "protect_content": True,
@@ -104,11 +112,37 @@ def save_and_push(filename, data, message):
     write_local(filename, data)
     github_put(filename, data, message)
 
+# YANGI: navbatga qo'yib saqlash - har safar emas, balki to'plab keyin push qiladi.
+# Lokal faylga DARHOL yoziladi (hech narsa yo'qolmaydi), GitHub'ga esa navbat orqali.
+def queue_save(filename, data, message):
+    write_local(filename, data)
+    with _pending_saves_lock:
+        _pending_saves[filename] = (data, message)
+
+# YANGI: navbatdagi barcha o'zgarishlarni GitHub'ga push qiladi (avto-bekap tikleri uchun)
+def flush_pending_saves():
+    with _pending_saves_lock:
+        items = list(_pending_saves.items())
+        _pending_saves.clear()
+    for filename, (data, message) in items:
+        github_put(filename, data, message)
+
+# YANGI: avto-bekap - har AUTO_BACKUP_INTERVAL soniyada navbatdagilarni GitHub'ga yuboradi
+AUTO_BACKUP_INTERVAL = 60  # soniya
+
+def auto_backup_loop():
+    while True:
+        threading.Event().wait(AUTO_BACKUP_INTERVAL)
+        try:
+            flush_pending_saves()
+        except Exception:
+            pass
+
 # ==================== MA'LUMOT YUKLASH ====================
 def load_data():
     global admins, movies, channels, catalogs, genres, users, active_users
     global deleted_users, blocked_users, ad_post_id, bot_settings
-    global views, saved_movies, admin_logs
+    global views, saved_movies, admin_logs, ratings, part_progress
 
     movies.update(read_file("movies.json", {}))
     channels.update(read_file("channels.json", {}))
@@ -118,6 +152,12 @@ def load_data():
     saved_movies.update({str(k): v for k, v in saved_movies_raw.items()})
     admin_logs_raw = read_file("admin_logs.json", [])
     admin_logs.extend(admin_logs_raw[-200:])
+
+    # YANGI: reyting va qism-progress yuklash
+    ratings_raw = read_file("ratings.json", {})
+    ratings.update(ratings_raw)
+    part_progress_raw = read_file("part_progress.json", {})
+    part_progress.update(part_progress_raw)
 
     # MUAMMO SHU YERDA EDI: Agar Github yoki localda fayl bo'sh bo'lsa ham [] qaytardi,
     # lekin None tekshirilgani uchun doim eski default janrlar qaytib kelaverardi.
@@ -167,6 +207,42 @@ def increment_views(movie_code):
 def is_admin(user_id): return user_id in admins
 def is_blocked(user_id): return user_id in blocked_users
 
+# ==================== YANGI: REYTING FUNKSIYALARI ====================
+def set_rating(movie_code, user_id, score):
+    if movie_code not in ratings:
+        ratings[movie_code] = {}
+    ratings[movie_code][str(user_id)] = score
+    queue_save("ratings.json", ratings, f"Reyting yangilandi: {movie_code}")
+
+def get_avg_rating(movie_code):
+    scores = ratings.get(movie_code, {})
+    if not scores: return 0.0, 0
+    vals = list(scores.values())
+    return sum(vals) / len(vals), len(vals)
+
+def get_user_rating(movie_code, user_id):
+    return ratings.get(movie_code, {}).get(str(user_id))
+
+def stars_str(avg):
+    full = round(avg)
+    return "⭐" * full + "☆" * (5 - full) if avg > 0 else "Baholanmagan"
+
+# ==================== YANGI: QISMLI KINO YORDAMCHI FUNKSIYALARI ====================
+def get_video_ids(data):
+    """movie ma'lumotidan video_id ro'yxatini qaytaradi (har doim list)."""
+    video_ids_raw = data.get("video_id") if isinstance(data, dict) else data
+    if isinstance(video_ids_raw, str):
+        return [v.strip() for v in video_ids_raw.split(",") if v.strip()]
+    elif isinstance(video_ids_raw, list):
+        return video_ids_raw
+    return [str(video_ids_raw)]
+
+def is_multi_part(data):
+    return len(get_video_ids(data)) > 1
+
+def get_part_progress_key(user_id, movie_code):
+    return f"{user_id}_{movie_code}"
+
 # ==================== KLAVIATURALAR ====================
 def get_user_inline_keyboard():
     return InlineKeyboardMarkup([
@@ -178,6 +254,10 @@ def get_user_inline_keyboard():
         [
             InlineKeyboardButton("🔥 Top kinolar", switch_inline_query_current_chat="top"),
             InlineKeyboardButton("❤️ Saqlanganlar", callback_data="my_saved")
+        ],
+        [
+            InlineKeyboardButton("🎲 Tasodifiy kino", callback_data="random_movie"),
+            InlineKeyboardButton("⭐ Top baholangan", callback_data="top_rated")
         ]
     ])
 
@@ -233,6 +313,12 @@ async def send_movie(chat_id, movie_code, bot, notify_new=False):
     else:
         video_ids = [str(video_ids_raw)]
 
+    # YANGI: agar kino bir nechta qismdan iborat bo'lsa (video_id'da vergul bilan
+    # ajratilgan bir nechta ID bo'lsa), uni alohida qism-navigatsiyali rejimda yuboramiz.
+    # Eski xulq-atvor (bitta qism bo'lsa) butunlay o'zgarishsiz qoladi.
+    if len(video_ids) > 1:
+        return await send_movie_part(chat_id, movie_code, 0, bot)
+
     name = data.get("name", movie_code) if isinstance(data, dict) else movie_code
     protect = False if is_admin(chat_id) else bot_settings.get("protect_content", True)
 
@@ -241,7 +327,8 @@ async def send_movie(chat_id, movie_code, bot, notify_new=False):
         [
             InlineKeyboardButton("❤️ Saqlash", callback_data=f"save_{movie_code}"),
             InlineKeyboardButton("🏠 Bosh menyu", callback_data="go_to_main_menu")
-        ]
+        ],
+        [InlineKeyboardButton("⭐ Baholash", callback_data=f"rate_menu_{movie_code}")]
     ])
 
     success = False
@@ -274,7 +361,87 @@ async def send_movie(chat_id, movie_code, bot, notify_new=False):
 
     return True
 
-# ==================== START ====================
+# ==================== YANGI: QISMLI KINO YUBORISH ====================
+def build_part_nav_keyboard(movie_code, part_index, total_parts):
+    """Qism uchun ◀️ Oldingi / Keyingi ▶️ va boshqa tugmalarni quradi."""
+    nav_row = []
+    if part_index > 0:
+        nav_row.append(InlineKeyboardButton("◀️ Oldingi qism", callback_data=f"part_{movie_code}_{part_index-1}"))
+    if part_index < total_parts - 1:
+        nav_row.append(InlineKeyboardButton("Keyingi qism ▶️", callback_data=f"part_{movie_code}_{part_index+1}"))
+
+    rows = []
+    if nav_row:
+        rows.append(nav_row)
+    rows.append([InlineKeyboardButton(f"📋 Qismlar ({part_index+1}/{total_parts})", callback_data=f"partlist_{movie_code}")])
+    rows.append([
+        InlineKeyboardButton("❤️ Saqlash", callback_data=f"save_{movie_code}"),
+        InlineKeyboardButton("🏠 Bosh menyu", callback_data="go_to_main_menu")
+    ])
+    rows.append([InlineKeyboardButton("⭐ Baholash", callback_data=f"rate_menu_{movie_code}")])
+    return InlineKeyboardMarkup(rows)
+
+def build_parts_list_keyboard(movie_code, total_parts):
+    """Barcha qismlarni raqamlab ko'rsatadigan klaviatura (3 tadan qatorga)."""
+    kb = []
+    row = []
+    for i in range(total_parts):
+        row.append(InlineKeyboardButton(str(i + 1), callback_data=f"part_{movie_code}_{i}"))
+        if len(row) == 5:
+            kb.append(row)
+            row = []
+    if row:
+        kb.append(row)
+    kb.append([InlineKeyboardButton("🔙 Orqaga", callback_data=f"part_back_{movie_code}")])
+    return InlineKeyboardMarkup(kb)
+
+async def send_movie_part(chat_id, movie_code, part_index, bot, edit_message=None):
+    """Qismli kinoning faqat bitta qismini, navigatsiya tugmalari bilan yuboradi."""
+    if movie_code not in movies: return False
+    data = movies[movie_code]
+    video_ids = get_video_ids(data)
+    total_parts = len(video_ids)
+
+    if part_index < 0 or part_index >= total_parts:
+        part_index = 0
+
+    name = data.get("name", movie_code) if isinstance(data, dict) else movie_code
+    protect = False if is_admin(chat_id) else bot_settings.get("protect_content", True)
+    vid = video_ids[part_index]
+
+    kb = build_part_nav_keyboard(movie_code, part_index, total_parts)
+
+    try:
+        await bot.copy_message(
+            chat_id=chat_id,
+            from_chat_id=SOURCE_CHANNEL,
+            message_id=int(vid),
+            reply_markup=kb,
+            protect_content=protect
+        )
+    except Exception:
+        return False
+
+    # Foydalanuvchining shu kinodagi joriy qismini xotirada va faylda saqlaymiz
+    progress_key = get_part_progress_key(chat_id, movie_code)
+    part_progress[progress_key] = part_index
+    queue_save("part_progress.json", part_progress, "Qism progressi yangilandi")
+
+    if not is_admin(chat_id) and part_index == 0:
+        increment_views(movie_code)
+
+    if ad_post_id and not is_admin(chat_id) and part_index == 0:
+        try:
+            await bot.copy_message(
+                chat_id=chat_id,
+                from_chat_id=SOURCE_CHANNEL,
+                message_id=int(ad_post_id),
+                protect_content=True
+            )
+        except Exception: pass
+
+    return True
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
@@ -626,14 +793,52 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "📊 Statistika":
+        # Eng ko'p ko'rilgan kino
+        most_viewed = "Yo'q"
+        if views:
+            top_code = max(views, key=views.get)
+            top_name = movies.get(top_code, {}).get("name", top_code) if isinstance(movies.get(top_code), dict) else top_code
+            most_viewed = f"{top_name} ({views[top_code]} marta)"
+
+        # Eng ko'p saqlangan kino
+        save_counts = {}
+        for uid_str, codes in saved_movies.items():
+            for c in codes:
+                save_counts[c] = save_counts.get(c, 0) + 1
+        most_saved = "Yo'q"
+        if save_counts:
+            top_save_code = max(save_counts, key=save_counts.get)
+            top_save_name = movies.get(top_save_code, {}).get("name", top_save_code) if isinstance(movies.get(top_save_code), dict) else top_save_code
+            most_saved = f"{top_save_name} ({save_counts[top_save_code]} marta)"
+
+        # Eng yuqori reytingli kino
+        best_rated = "Yo'q"
+        best_avg, best_count = 0, 0
+        best_code = None
+        for code in movies:
+            avg, count = get_avg_rating(code)
+            if count > 0 and avg > best_avg:
+                best_avg, best_count, best_code = avg, count, code
+        if best_code:
+            bname = movies.get(best_code, {}).get("name", best_code) if isinstance(movies.get(best_code), dict) else best_code
+            best_rated = f"{bname} ({best_avg:.1f}⭐, {best_count} ovoz)"
+
+        # Bugun qo'shilgan ro'yxat (oxirgi loglardan)
+        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        today_actions = len([l for l in admin_logs if l.get("time", "").startswith(today_str)])
+
         await update.message.reply_text(
             f"📊 Statistika:\n\n"
-            f"👥 Jami: {len(users)}\n"
+            f"👥 Jami foydalanuvchi: {len(users)}\n"
             f"✅ Faol: {len(active_users)}\n"
-            f"❌ Bloklagan: {len(deleted_users)}\n"
+            f"❌ Bloklagan (botni o'chirgan): {len(deleted_users)}\n"
             f"🚫 Botda bloklangan: {len(blocked_users)}\n"
-            f"🎬 Kinolar: {len(movies)}\n"
-            f"👁 Jami ko'rishlar: {sum(views.values())}"
+            f"🎬 Jami kinolar: {len(movies)}\n"
+            f"👁 Jami ko'rishlar: {sum(views.values())}\n\n"
+            f"🔥 Eng ko'p ko'rilgan: {most_viewed}\n"
+            f"❤️ Eng ko'p saqlangan: {most_saved}\n"
+            f"⭐ Eng yuqori baholangan: {best_rated}\n\n"
+            f"📝 Bugungi admin amallari: {today_actions}"
         )
         return
 
@@ -704,10 +909,103 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ==================== CALLBACKS ====================
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global movies, channels, catalogs, genres, users, active_users, deleted_users, bot_settings, saved_movies
+    global movies, channels, catalogs, genres, users, active_users, deleted_users, bot_settings, saved_movies, ratings
     query = update.callback_query
     user_id = query.from_user.id
     data = query.data
+
+    # ==================== YANGI: TASODIFIY KINO ====================
+    if data == "random_movie":
+        await query.answer()
+        if not movies:
+            await context.bot.send_message(chat_id=user_id, text="🎬 Hozircha bazada kino yo'q.")
+            return
+        import random
+        movie_code = random.choice(list(movies.keys()))
+        await send_movie(user_id, movie_code, context.bot)
+        return
+
+    # ==================== YANGI: TOP BAHOLANGAN KINOLAR ====================
+    if data == "top_rated":
+        await query.answer()
+        scored = []
+        for code in movies:
+            avg, count = get_avg_rating(code)
+            if count > 0:
+                scored.append((code, avg, count))
+        if not scored:
+            await context.bot.send_message(chat_id=user_id, text="⭐ Hali hech qanday kino baholanmagan.")
+            return
+        scored.sort(key=lambda x: (x[1], x[2]), reverse=True)
+        lines = []
+        for i, (code, avg, count) in enumerate(scored[:10], 1):
+            d = movies[code]
+            name = d.get("name", code).upper() if isinstance(d, dict) else code.upper()
+            lines.append(f"{i}. {name} — {stars_str(avg)} ({avg:.1f}/5, {count} ovoz) | Kod: {code}")
+        await context.bot.send_message(chat_id=user_id, text="⭐ Top baholangan kinolar:\n\n" + "\n".join(lines))
+        return
+
+    # ==================== YANGI: BAHOLASH MENYUSI ====================
+    if data.startswith("rate_menu_"):
+        await query.answer()
+        movie_code = data.replace("rate_menu_", "")
+        avg, count = get_avg_rating(movie_code)
+        user_score = get_user_rating(movie_code, user_id)
+        kb_rows = []
+        row = []
+        for i in range(1, 6):
+            mark = "✅" if user_score == i else ""
+            row.append(InlineKeyboardButton(f"{mark}{'⭐'*i}", callback_data=f"rate_{movie_code}_{i}"))
+        kb_rows.append(row)
+        kb = InlineKeyboardMarkup(kb_rows)
+        info = f"{stars_str(avg)} ({avg:.1f}/5, {count} ovoz)" if count else "Hali baholanmagan"
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"⭐ Ushbu kinoga baho bering:\n\nHozirgi reyting: {info}",
+            reply_markup=kb
+        )
+        return
+
+    if data.startswith("rate_") and not data.startswith("rate_menu_"):
+        await query.answer()
+        rest = data[len("rate_"):]
+        movie_code, _, score_str = rest.rpartition("_")
+        score = int(score_str)
+        set_rating(movie_code, user_id, score)
+        avg, count = get_avg_rating(movie_code)
+        await query.answer(f"✅ Siz {score} ⭐ baho berdingiz! O'rtacha: {avg:.1f}/5", show_alert=True)
+        return
+
+    # ==================== YANGI: QISMLI KINO NAVIGATSIYASI ====================
+    if data.startswith("part_") and not data.startswith("part_back_") and not data.startswith("partlist_"):
+        await query.answer()
+        # rsplit ishlatamiz, chunki kino kodining o'zida "_" bo'lishi mumkin
+        rest = data[len("part_"):]
+        movie_code, _, idx_str = rest.rpartition("_")
+        part_index = int(idx_str)
+        await send_movie_part(user_id, movie_code, part_index, context.bot)
+        return
+
+    if data.startswith("partlist_"):
+        await query.answer()
+        movie_code = data.replace("partlist_", "")
+        if movie_code in movies:
+            total_parts = len(get_video_ids(movies[movie_code]))
+            kb = build_parts_list_keyboard(movie_code, total_parts)
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"📋 Qismlar ro'yxati ({total_parts} ta) — kerakli qismni tanlang:",
+                reply_markup=kb
+            )
+        return
+
+    if data.startswith("part_back_"):
+        await query.answer()
+        movie_code = data.replace("part_back_", "")
+        progress_key = get_part_progress_key(user_id, movie_code)
+        current = part_progress.get(progress_key, 0)
+        await send_movie_part(user_id, movie_code, current, context.bot)
+        return
 
     if data == "check":
         if await is_joined(context.bot, user_id):
@@ -1121,12 +1419,31 @@ def run_fake_server():
     server = HTTPServer(("0.0.0.0", port), SimpleHTTPRequestHandler)
     server.serve_forever()
 
+# YANGI: keep-alive - bot "uxlab qolib" RAM tozalanishining oldini olish uchun
+# o'zini har 4 daqiqada bir marta so'rab turadi (Render kabi bepul hostinglar
+# bir necha daqiqa harakatsizlikdan keyin botni to'xtatib qo'yadi).
+def keep_alive_loop():
+    if not RENDER_EXTERNAL_URL:
+        return
+    while True:
+        threading.Event().wait(240)
+        try:
+            requests.get(RENDER_EXTERNAL_URL, timeout=10)
+        except Exception:
+            pass
+
 def main():
     load_data()
     if not TOKEN: return
     
     # Soxta serverni alohida oqimda ishga tushirish
     threading.Thread(target=run_fake_server, daemon=True).start()
+
+    # YANGI: avto-bekap oqimi - navbatdagi o'zgarishlarni har 60 soniyada GitHub'ga yuboradi
+    threading.Thread(target=auto_backup_loop, daemon=True).start()
+
+    # YANGI: keep-alive oqimi - botni "uxlab qolishdan" saqlaydi
+    threading.Thread(target=keep_alive_loop, daemon=True).start()
     
     app = ApplicationBuilder().token(TOKEN).build()
 
