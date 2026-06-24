@@ -46,15 +46,15 @@ ad_post_id = None
 views = {}          
 saved_movies = {}   
 
-ratings = {}        # {"movie_code": {"user_id": baho}}
-part_progress = {}  # {"user_id_movie_code": current_part_index}
+ratings = {}        
+part_progress = {}  
 
 _pending_saves = {}      
 _pending_saves_lock = threading.Lock()
 
 bot_settings = {
     "protect_content": True,
-    "start_media_type": "text", # text, photo, animation
+    "start_media_type": "text",
     "start_file_id": None,
     "start_text": (
         "👋 Assalomu alaykum {name}, botimizga xush kelibsiz\n\n"
@@ -200,9 +200,6 @@ def get_avg_rating(movie_code):
     vals = list(scores.values())
     return sum(vals) / len(vals), len(vals)
 
-def get_user_rating(movie_code, user_id):
-    return ratings.get(movie_code, {}).get(str(user_id))
-
 # ==================== TOP BAHOLANGANLAR SAHIFALASH ====================
 TOP_RATED_PAGE_SIZE = 10
 
@@ -240,14 +237,18 @@ def build_top_rated_keyboard(scored, page, prefix="toprated"):
     if nav_row:
         kb.append(nav_row)
 
+    # ASOSIY MENU TUGMASI TOP BAHOLANGANLAR VA SAQLANGANLARGA QO'SHILDI
+    kb.append([InlineKeyboardButton("🏠 Asosiy menu", callback_data="go_to_main_menu")])
+
     return InlineKeyboardMarkup(kb), page_items, start
 
 async def show_top_rated_page(message, bot, page, edit=False):
     scored = get_sorted_top_rated()
     if not scored:
         text = "⭐ Hali hech qanday kino baholanmagan."
-        if edit: await message.edit_text(text)
-        else: await bot.send_message(chat_id=message.chat_id, text=text)
+        kb_menu = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy menu", callback_data="go_to_main_menu")]])
+        if edit: await message.edit_text(text, reply_markup=kb_menu)
+        else: await bot.send_message(chat_id=message.chat_id, text=text, reply_markup=kb_menu)
         return
 
     kb, page_items, start = build_top_rated_keyboard(scored, page, "toprated")
@@ -272,8 +273,9 @@ async def show_saved_movies_page(chat_id, bot, page, edit=False, message=None):
     
     if not valid:
         text = "❤️ Siz hali hech qanday kino saqlamagansiz.\n\nKinoni ko'rayotganda '❤️ Saqlash' tugmasini bosing!"
-        if edit and message: await message.edit_text(text)
-        else: await bot.send_message(chat_id=chat_id, text=text)
+        kb_menu = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Asosiy menu", callback_data="go_to_main_menu")]])
+        if edit and message: await message.edit_text(text, reply_markup=kb_menu)
+        else: await bot.send_message(chat_id=chat_id, text=text, reply_markup=kb_menu)
         return
 
     kb, page_items, start = build_top_rated_keyboard(valid, page, "mysaved")
@@ -410,6 +412,7 @@ async def send_movie(chat_id, movie_code, bot, notify_new=False):
     if len(video_ids) > 1:
         return await send_movie_part(chat_id, movie_code, 0, bot)
 
+    # UZATISHNI CHEKLASH SOZLAMASI (Adminga doim ruxsat beriladi)
     protect = False if is_admin(chat_id) else bot_settings.get("protect_content", True)
 
     movie_kb = InlineKeyboardMarkup([
@@ -657,13 +660,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if state == "add_admin_id":
         if not text.isdigit():
-            await update.message.reply_text("❌ Faqat raqamlardan iborat Telegram ID kiriting:", reply_markup=get_cancel_keyboard())
+            await update.message.reply_text("❌ Telegram ID faqat raqamdan iborat bo'ladi:", reply_markup=get_cancel_keyboard())
             return
         new_id = int(text)
         admins.add(new_id)
         save_and_push("admins.json", list(admins), "Yangi admin qo'shildi")
         admin_states[user_id] = None
-        await update.message.reply_text(f"✅ {new_id} muvaffaqiyatli admin qilindi!", reply_markup=get_admin_keyboard())
+        await update.message.reply_text(f"✅ ID: {new_id} muvaffaqiyatli admin qilindi!", reply_markup=get_admin_keyboard())
         return
 
     if not text: return
@@ -685,7 +688,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state == "add_movie_text":
         lines = [l.strip() for l in text.split("\n") if l.strip()]
         if len(lines) < 5:
-            await update.message.reply_text("❌ 5 ta qator kerak! Qayta yuboring:", reply_markup=get_cancel_keyboard())
+            await update.message.reply_text("❌ Kamida 5 ta qator bo'lishi shart! Qayta yuboring:", reply_markup=get_cancel_keyboard())
             return
         new_movie_wizard[user_id] = {
             "name": lines[0], "desc": lines[1], "code": lines[2].lower(),
@@ -757,12 +760,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state == "channel_add":
         parts = text.split(" ", 1)
         if len(parts) < 2:
-            await update.message.reply_text("❌ Format:\n@username Kanal nomi\nyoki\n-1001234567890 Kanal nomi", reply_markup=get_cancel_keyboard())
+            await update.message.reply_text("❌ Format xato.\n@username Kanal nomi\nyoki\n-1001234567890 Kanal nomi", reply_markup=get_cancel_keyboard())
             return
         channels[parts[0].strip()] = parts[1].strip()
         save_and_push("channels.json", channels, "Kanal qo'shildi")
         admin_states[user_id] = None
-        await update.message.reply_text("✅ Kanal qo'shildi!", reply_markup=get_admin_keyboard())
+        await update.message.reply_text("✅ Majburiy kanal qo'shildi!", reply_markup=get_admin_keyboard())
         return
 
     if state == "broadcast":
@@ -783,7 +786,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(msg, reply_markup=get_admin_keyboard())
         return
 
-    # ADMIN TUGMALARI DIAGNOSTIKASI
+    # ADMIN PANEL TUGMALARI
     if text == "➕ Kino qo'shish":
         admin_states[user_id] = "add_movie_text"
         await update.message.reply_text("➕ 5 qatorli shablonni to'ldirib yuboring:\n\nKino nomi\nTavsif\nkod\nhttps://poster.jpg\nPostID", reply_markup=get_cancel_keyboard())
@@ -853,9 +856,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"🎬 Kinolar ro'yxati ({len(movies)} ta):\n\n" + "\n".join(lines_list[:50]))
         return
 
-    if text == "⚙️ Bot Sozlamalari":
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("📝 Start xabarini o'zgartirish", callback_data="edit_start")], [InlineKeyboardButton("📢 Majburiy kanallar", callback_data="manage_ch")]])
-        await update.message.reply_text("⚙️ Bot sozalamalari:", reply_markup=kb)
+    if text == "⚙️ Bot Sozalamalari":
+        status_str = "O'CHIRILGAN 🔴 (Kinolarni uzatib bo'ladi)" if not bot_settings.get("protect_content", True) else "YOQILGAN 🟢 (Uzatish taqiqlangan)"
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📝 Start xabarini o'zgartirish", callback_data="edit_start")],
+            [InlineKeyboardButton("📢 Majburiy kanallar", callback_data="manage_ch")],
+            [InlineKeyboardButton(f"🔒 Uzatish cheklovi: {status_str}", callback_data="toggle_protect")]
+        ])
+        await update.message.reply_text("⚙️ Bot sozlamalari bo'limi:", reply_markup=kb)
         await update.message.reply_text("Qaytish:", reply_markup=get_return_main_keyboard())
         return
 
@@ -898,7 +906,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_saved_movies_page(user_id, context.bot, page, edit=data.startswith("mysaved_page_"), message=query.message)
         return
 
-    # BAHOLASH TUGMALARI (YONMA-YON 5 TASI YULDUZCHA)
+    # BAHOLASH BO'LIMI TUGMALARI
     if data.startswith("rate_menu_"):
         await query.answer()
         movie_code = data.replace("rate_menu_", "")
@@ -917,12 +925,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data.startswith("rate_") and not data.startswith("rate_menu_"):
-        await query.answer()
         rest = data[len("rate_"):]
         movie_code, _, score_str = rest.rpartition("_")
         set_rating(movie_code, user_id, int(score_str))
         avg, _ = get_avg_rating(movie_code)
-        await query.answer(f"✅ Baholandi! Yangi o'rtacha: {avg:.1f}/5", show_alert=True)
+        
+        # TUZATISH: Baholagandan keyin xabar o'chadi va alert bildirishnoma beradi
+        await query.message.delete()
+        await query.answer(f"✅ Rahmat! Kinoga {score_str} ball berildi. Yangi reyting: {avg:.1f}/5", show_alert=True)
         return
 
     if data.startswith("part_") and not data.startswith("part_back_") and not data.startswith("partlist_"):
@@ -957,6 +967,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "go_to_main_menu":
         await query.answer()
+        # TUZATISH: Katalog, janr va menyular orasida o'tishda xabarlarni tozalash
+        try: await query.message.delete()
+        except Exception: pass
         await send_welcome_message(user_id, context.bot, query.from_user.first_name)
         return
 
@@ -971,8 +984,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if uid_str in saved_movies and movie_code in saved_movies[uid_str]:
             saved_movies[uid_str].remove(movie_code)
             save_and_push("saved_movies.json", saved_movies, "Saqlanganlardan o'chirildi")
-        await query.answer("🗑️ O'chirildi!", show_alert=True)
-        await query.message.delete()
+        await query.answer("🗑️ Ro'yxatdan o'chirildi!", show_alert=True)
+        try: await query.message.delete()
+        except Exception: pass
         await show_saved_movies_page(user_id, context.bot, 0)
         return
 
@@ -988,6 +1002,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("✨ Allaqachon saqlangan!", show_alert=True)
         return
 
+    # KATALOG VA JANRLARNI BOSGANDA ESKI XABARNI O'CHIRISH
     if data == "user_show_catalogs":
         await query.answer()
         kb = []
@@ -996,7 +1011,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if i + 1 < len(catalogs): row.append(InlineKeyboardButton(catalogs[i+1], switch_inline_query_current_chat=f"katalog:{catalogs[i+1]}"))
             kb.append(row)
         kb.append([InlineKeyboardButton("⬅️ Orqaga", callback_data="go_to_main_menu")])
-        await query.message.edit_text("📂 Kerakli katalogni tanlang:", reply_markup=InlineKeyboardMarkup(kb))
+        await query.message.edit_text("📂 Kerakli katalogni tanlang va inline rejimda kinolarni ko'ring:", reply_markup=InlineKeyboardMarkup(kb))
         return
 
     if data == "user_show_genres":
@@ -1007,12 +1022,26 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if i + 1 < len(genres): row.append(InlineKeyboardButton(genres[i+1], switch_inline_query_current_chat=f"janr:{genres[i+1]}"))
             kb.append(row)
         kb.append([InlineKeyboardButton("⬅️ Orqaga", callback_data="go_to_main_menu")])
-        await query.message.edit_text("🎭 Kerakli janrni tanlang:", reply_markup=InlineKeyboardMarkup(kb))
+        await query.message.edit_text("🎭 Kerakli janrni tanlang va inline rejimda kinolarni ko'ring:", reply_markup=InlineKeyboardMarkup(kb))
         return
 
     if not is_admin(user_id): return
 
-    # ADMIN PANEL ISHLARI
+    # ADMIN KONTROLLARI
+    if data == "toggle_protect":
+        current = bot_settings.get("protect_content", True)
+        bot_settings["protect_content"] = not current
+        save_and_push("settings.json", bot_settings, "Protect content holati o'zgartirildi")
+        status_str = "O'CHIRILGAN 🔴 (Kinolarni uzatib bo'ladi)" if not bot_settings["protect_content"] else "YOQILGAN 🟢 (Uzatish taqiqlangan)"
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📝 Start xabarini o'zgartirish", callback_data="edit_start")],
+            [InlineKeyboardButton("📢 Majburiy kanallar", callback_data="manage_ch")],
+            [InlineKeyboardButton(f"🔒 Uzatish cheklovi: {status_str}", callback_data="toggle_protect")]
+        ])
+        await query.message.edit_reply_markup(reply_markup=kb)
+        await query.answer("✅ Sozlama o'zgartirildi!", show_alert=True)
+        return
+
     if data == "add_admin":
         await query.answer()
         admin_states[user_id] = "add_admin_id"
@@ -1036,7 +1065,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=user_id, text=f"✅ {adm_id} adminlikdan olindi!", reply_markup=get_admin_keyboard())
         return
 
-    # MAJBURIY KANALLAR TUZATILDI (CHIROYLI REJIM VA TASDIQLASH BILAN)
     if data == "manage_ch":
         await query.answer()
         kb = [[InlineKeyboardButton(f"📢 {name}", callback_data=f"view_ch_{ch_id}")] for ch_id, name in channels.items()]
@@ -1180,10 +1208,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "edit_start":
         await query.answer()
         admin_states[user_id] = "edit_start_text"
-        await context.bot.send_message(chat_id=user_id, text="📝 Yangi start xabarini yuboring (Rasm, GIF yoki oddiy Matn bo'lishi mumkin):", reply_markup=get_cancel_keyboard())
+        await context.bot.send_message(chat_id=user_id, text="📝 Yangi start xabarini yuboring (Media yoki oddiy Matn bo'lishi mumkin):", reply_markup=get_cancel_keyboard())
         return
 
-    # KINO QO'SHISH YAKUNIY BOSQICHI (SO'ROVSIZ FULL TUGAYDI)
     if data.startswith("wiz_cat_"):
         await query.answer()
         val = data.replace("wiz_cat_", "")
@@ -1196,7 +1223,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             idx = int(val)
             if user_id in new_movie_wizard and catalogs[idx] not in new_movie_wizard[user_id]["catalogs"]:
                 new_movie_wizard[user_id]["catalogs"].append(catalogs[idx])
-                await query.answer(f"➕ Qo'shildi")
+                await query.answer(f"➕ {catalogs[idx]} qo'shildi")
         return
 
     if data.startswith("wiz_gen_"):
@@ -1214,7 +1241,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             idx = int(val)
             if user_id in new_movie_wizard and genres[idx] not in new_movie_wizard[user_id]["genres"]:
                 new_movie_wizard[user_id]["genres"].append(genres[idx])
-                await query.answer(f"➕ Qo'shildi")
+                await query.answer(f"➕ {genres[idx]} qo'shildi")
         return
 
     if data == "broadcast_confirm":
@@ -1251,21 +1278,12 @@ def keep_alive_loop():
 
 def main():
     load_data()
-    if not TOKEN: 
-        print("XATO: TOKEN topilmadi!")
-        return
+    if not TOKEN: return
     
-    # Soxta serverni Render portni tekshirishidan oldin tayyorlash
-    print("Soxta server ishga tushmoqda...")
     threading.Thread(target=run_fake_server, daemon=True).start()
-
-    # Avto-bekap oqimi
     threading.Thread(target=auto_backup_loop, daemon=True).start()
-
-    # Keep-alive oqimi
     threading.Thread(target=keep_alive_loop, daemon=True).start()
     
-    print("Telegram Bot ulanmoqda...")
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
