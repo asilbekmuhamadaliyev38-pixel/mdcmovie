@@ -258,5 +258,13 @@
       "Komediya",
       "Sarguzasht"
     ]
+  },
+  "1": {
+    "name": "Mortal kombat 2",
+    "desc": "1080p",
+    "poster": "post",
+    "video_id": "4",
+    "catalogs": [],
+    "genres": []
   }
 }
