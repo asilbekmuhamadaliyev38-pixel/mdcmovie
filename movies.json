@@ -272,7 +272,9 @@
     "desc": "480p Ts",
     "poster": "https://i.ibb.co/Vp3ZYP1r/photo.jpg",
     "video_id": "71",
-    "catalogs": [],
+    "catalogs": [
+      "2026-yil filmlari"
+    ],
     "genres": []
   }
 }
